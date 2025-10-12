@@ -1,15 +1,15 @@
-version: '3.9'
+# docker-compose.yml
+version: "3.9"
 services:
-  db:
-    image: postgres:16
-    container_name: iw-postgres
+  backend:
+    build: ./packages/backend
+    env_file: .env
     environment:
-      POSTGRES_PASSWORD: devpass
-      POSTGRES_DB: insurance_workflow
-      POSTGRES_USER: workflow_user
+      # Ensure Node sees production, but keep your KNEX config from .env
+      NODE_ENV: production
     ports:
-      - "5432:5432"
+      - "4000:4000"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-volumes:
-  pgdata:
+      # For CCC ingest inbox/archive on the server
+      - ./data:/app/data
+    # If you use DO Managed PG, no 'db' service needed.
