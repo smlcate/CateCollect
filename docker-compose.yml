@@ -1,15 +1,34 @@
-# docker-compose.yml
-version: "3.9"
+# docker-compose.yml  (db + backend)
 services:
+  db:
+    image: postgres:16
+    container_name: iw-postgres
+    environment:
+      POSTGRES_DB: insurance_workflow
+      POSTGRES_USER: workflow_user
+      POSTGRES_PASSWORD: devpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   backend:
     build: ./packages/backend
     env_file: .env
     environment:
-      # Ensure Node sees production, but keep your KNEX config from .env
       NODE_ENV: production
+      # Point knex to the internal db service
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: insurance_workflow
+      PGUSER: workflow_user
+      PGPASSWORD: devpass
+    depends_on:
+      - db
     ports:
       - "4000:4000"
     volumes:
-      # For CCC ingest inbox/archive on the server
       - ./data:/app/data
-    # If you use DO Managed PG, no 'db' service needed.
+
+volumes:
+  pgdata:
