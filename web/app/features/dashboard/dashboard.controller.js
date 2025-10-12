@@ -1,0 +1,1 @@
+(function(){'use strict';angular.module('iwApp').controller('DashboardCtrl',function($http){var vm=this;vm.health='(checking...)';$http.get('/api/health').then(function(r){vm.health=JSON.stringify(r.data);}).catch(function(){vm.health='(failed)';});});})();

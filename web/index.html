@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" ng-app="iwApp">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>CateCollect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <nav style="padding:8px;border-bottom:1px solid #eee">
+    <a href="#!/">Claims</a> · <a href="#!/claims/new">New Claim</a>
+  </nav>
+
+  <div ng-view></div>
+
+  <!-- Angular (local, CSP-safe) -->
+  <script src="/node_modules/angular/angular.min.js"></script>
+  <script src="/node_modules/angular-route/angular-route.min.js"></script>
+
+  <!-- App core -->
+  <script src="app/app.module.js"></script>
+  <script src="app/app.routes.js"></script>
+
+  <!-- Services -->
+  <script src="app/services/api.service.js"></script>
+  <script src="app/services/upload.service.js"></script>
+
+  <!-- Features -->
+  <script src="app/features/claims/claims-list.controller.js"></script>
+  <script src="app/features/claims/new-claim.controller.js"></script>
+  <script src="app/features/claims/claim-detail.controller.js"></script>
+</body>
+</html>

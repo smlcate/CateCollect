@@ -1,0 +1,1 @@
+print("Worker placeholder - implement file watching, OCR, and packaging here.")

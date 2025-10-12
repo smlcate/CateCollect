@@ -1,0 +1,90 @@
+<section class="claims-list">
+  <header class="bar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <h2>Claims</h2>
+      <span class="badge-warn" title="Number of claims missing required docs">
+        ⚠ {{ vm.incompleteVisibleCount() }}
+      </span>
+    </div>
+    <div class="actions">
+      <input ng-model="vm.q" placeholder="Search (local filter)" />
+      <input ng-model="vm.globalQ" placeholder="Global search (API)" />
+      <button ng-click="vm.searchAll()" ng-disabled="vm.searching">Search</button>
+
+      <select ng-model="vm.filter.carrier_id" ng-change="vm.load()">
+        <option value="">All carriers</option>
+        <option ng-repeat="c in vm.carriers" value="{{c.id}}">{{c.name}}</option>
+      </select>
+
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" ng-model="vm.showIncompleteOnly" />
+        Only incomplete
+      </label>
+      <!-- Optional archive filter -->
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" ng-model="vm.showArchived" ng-change="vm.load()" />
+        Show archived
+      </label>
+
+      <button ng-click="vm.newClaim()">+ New claim</button>
+    </div>
+
+  </header>
+
+  <div ng-if="vm.loading">Loading…</div>
+
+  <table class="table" ng-if="!vm.loading">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Claim #</th>
+        <th>Customer</th>
+        <th>Carrier</th>
+        <th>Status</th>
+        <th>Updated</th>
+        <th>Docs</th>
+        <th>Ref</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="c in vm.filteredClaims()" ng-click="vm.open(c.id)" class="rowlink">
+        <td>{{c.id}}</td>
+        <td>{{c.claim_number}}</td>
+        <td>{{c.customer_name}}</td>
+        <td>{{c.carrier_name}}</td>
+        <td>{{c.status}}</td>
+        <td>{{c.updated_at | date:'short'}}</td>
+        <td
+          ng-class="{
+            'text-green': vm.isComplete(c.id),
+            'text-red': !vm.isComplete(c.id)
+          }"
+          title="{{ vm.missingText(c.id) }}"
+        >
+          {{ vm.summText(c.id) }}
+        </td>
+        <td>
+          <span title="Click to copy" ng-click="$event.stopPropagation(); navigator.clipboard.writeText(c.reference_code)">
+            {{c.reference_code || '—'}}
+          </span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<style>
+.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0}
+.bar .actions{display:flex;gap:8px;align-items:center}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{border-bottom:1px solid #eee;padding:8px;text-align:left}
+.rowlink{cursor:pointer}
+.rowlink:hover{background:#fafafa}
+input,select,button{padding:6px 8px}
+.text-green{color:#16a34a}
+.text-red{color:#b91c1c}
+.badge-warn{
+  display:inline-block; padding:2px 8px; border-radius:999px;
+  background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:600;
+}
+</style>

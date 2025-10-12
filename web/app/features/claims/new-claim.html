@@ -1,0 +1,39 @@
+<section class="new-claim">
+  <h2>New Claim</h2>
+  <div class="form">
+    <label>Claim #<br/>
+      <input ng-model="vm.form.claim_number" placeholder="e.g. CLM2001" />
+    </label>
+    <label>Customer Name<br/>
+      <input ng-model="vm.form.customer_name" placeholder="e.g. Jane Driver" />
+    </label>
+    <label>Carrier<br/>
+      <input list="carrierNames" ng-model="vm.form.carrier_name" placeholder="Start typing…" />
+      <datalist id="carrierNames">
+        <option ng-repeat="c in vm.carriers" value="{{c.name}}"></option>
+      </datalist>
+    </label>
+    <label>Status<br/>
+      <select ng-model="vm.form.status">
+        <option>Intake</option>
+        <option>Estimate</option>
+        <option>Supplement</option>
+        <option>Final</option>
+      </select>
+    </label>
+
+    <div class="actions">
+      <button ng-click="vm.submit()" ng-disabled="vm.saving">Create</button>
+      <a href="#!/">Cancel</a>
+    </div>
+
+    <p class="err" ng-if="vm.err">{{vm.err}}</p>
+  </div>
+</section>
+
+<style>
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:8px}
+label input, label select{width:100%;padding:8px}
+.actions{display:flex;gap:10px;margin-top:12px}
+.err{color:#b91c1c}
+</style>

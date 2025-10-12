@@ -1,0 +1,15 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:16
+    container_name: iw-postgres
+    environment:
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: insurance_workflow
+      POSTGRES_USER: workflow_user
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:

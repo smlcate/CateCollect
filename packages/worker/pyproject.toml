@@ -1,0 +1,4 @@
+[project]
+name = "iw-worker"
+version = "0.1.0"
+dependencies = ["watchdog","requests","pytesseract","pillow","pypdf2"]
