@@ -12,6 +12,7 @@ import claimsRoutes from './routes/claims.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import errorMw from './middleware/error.js';
 import uploadsRoutes from './routes/uploads.routes.js';
+import claimChecklistRoutes from './routes/claims.checklist.routes.js';
 
 // --- CCC Ingest (routes/dashboard) ---
 import ingestApi from './routes/ingest.routes.js';
@@ -31,6 +32,7 @@ app.use(morgan('dev'));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/carriers', carriersRoutes);
 app.use('/api/claims', claimsRoutes);
+app.use('/api/claimsChecklist', claimChecklistRoutes);
 app.use('/api/documents', documentsRoutes);
 
 // ---------- CCC Ingest routes ----------

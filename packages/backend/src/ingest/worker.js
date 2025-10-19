@@ -1,120 +1,183 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-import { parseCCCFile } from './emsParser.js';
+import knex from '../../db/knexClient.js';
+import parseEMS from './emsParser.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
+const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
+const POLL_MS      = Number(process.env.POLL_INTERVAL_MS || 5000);
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Optional toggle to disable auto-creating claims from ingest
+const CLAIM_AUTOCREATE = process.env.CLAIM_AUTOCREATE !== '0';
+
+function sha256(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
 
 async function ensureDir(dir) {
-  try { await fs.mkdir(dir, { recursive: true }); } catch {}
+  await fs.mkdir(dir, { recursive: true });
 }
 
-async function sha256(filePath) {
-  const data = await fs.readFile(filePath);
-  return crypto.createHash('sha256').update(data).digest('hex');
+async function listInbox() {
+  try {
+    const entries = await fs.readdir(INCOMING_DIR, { withFileTypes: true });
+    return entries
+      .filter(e => e.isFile() && /\.(ems|xml)$/i.test(e.name))
+      .map(e => e.name);
+  } catch {
+    return [];
+  }
 }
 
-/**
- * Start a background poller that:
- * - scans INCOMING_DIR for .ems/.xml
- * - dedupes by checksum
- * - stores file + metadata rows
- * - moves file to ARCHIVE_DIR
- */
-export function startCccIngestWorker({
-  knex,
-  incomingDir = path.join(__dirname, '../../..', 'data', 'incoming'),
-  archiveDir  = path.join(__dirname, '../../..', 'data', 'archive'),
-  intervalMs = Number(process.env.POLL_INTERVAL_MS || 5000),
-  logger = console,
-}) {
-  let running = false;
-  let stop = false;
-
-  async function tick() {
-    if (running) return;
-    running = true;
-
-    try {
-      await ensureDir(incomingDir);
-      await ensureDir(archiveDir);
-
-      const names = await fs.readdir(incomingDir);
-      for (const name of names) {
-        if (stop) break;
-
-        const full = path.join(incomingDir, name);
-        const stat = await fs.stat(full).catch(() => null);
-        if (!stat?.isFile()) continue;
-
-        const ext = path.extname(name).toLowerCase();
-        if (!['.ems', '.xml'].includes(ext)) continue;
-
-        const checksum = await sha256(full);
-        const exists = await knex('ccc_files').select('id').where({ checksum }).first();
-        if (exists) {
-          // already processed — archive to keep inbox tidy
-          const dest = path.join(archiveDir, name);
-          await fs.rename(full, dest).catch(async () => {
-            await fs.rename(full, path.join(archiveDir, `${Date.now()}_${name}`)).catch(() => {});
-          });
-          continue;
-        }
-
-        // Insert file row
-        const [fileId] = await knex('ccc_files')
-          .insert({
-            original_name: name,
-            stored_path: full, // path pre-archive (for traceability)
-            checksum,
-            size_bytes: stat.size,
-            ext: ext.slice(1),
-            processed_at: knex.fn.now(),
-          })
-          .returning('id');
-
-        // Parse metadata (best-effort)
-        try {
-          const meta = await parseCCCFile(full);
-          await knex('ccc_metadata').insert({
-            file_id: Array.isArray(fileId) ? fileId[0].id ?? fileId[0] : fileId.id ?? fileId,
-            claim_number: meta.claim_number,
-            customer_name: meta.customer_name,
-            vehicle_vin: meta.vehicle_vin,
-            total_amount: meta.total_amount,
-            raw_preview: meta.raw_preview,
-          });
-        } catch (e) {
-          await knex('ccc_files')
-            .where({ id: Array.isArray(fileId) ? fileId[0].id ?? fileId[0] : fileId.id ?? fileId })
-            .update({ error: e?.message || String(e) });
-        }
-
-        // Move to archive
-        const dest = path.join(archiveDir, name);
-        await fs.rename(full, dest).catch(async () => {
-          await fs.rename(full, path.join(archiveDir, `${Date.now()}_${name}`)).catch(() => {});
-        });
-
-        logger.log(`[ccc-ingest] processed ${name} (id=${Array.isArray(fileId) ? fileId[0]?.id ?? fileId[0] : fileId?.id ?? fileId})`);
-      }
-    } catch (e) {
-      logger.error('[ccc-ingest] worker error:', e);
-    } finally {
-      running = false;
+async function moveToArchive(srcFullPath, storedName) {
+  const destDir = ARCHIVE_DIR;
+  await ensureDir(destDir);
+  const dest = path.join(destDir, storedName);
+  await fs.rename(srcFullPath, dest).catch(async (e) => {
+    if (e?.code === 'EXDEV') {
+      const buf = await fs.readFile(srcFullPath);
+      await fs.writeFile(dest, buf, { flag: 'wx' });
+      await fs.unlink(srcFullPath);
+    } else {
+      throw e;
     }
+  });
+  return dest;
+}
+
+async function upsertCccFile({ original_name, stored_path, size_bytes, sha256sum }) {
+  // Insert if not present; if present, return existing row
+  const existing = await knex('ccc_files').select('*').where({ sha256: sha256sum }).first();
+  if (existing) return existing;
+
+  const [row] = await knex('ccc_files')
+    .insert({
+      original_name,
+      stored_path,
+      size_bytes,
+      sha256: sha256sum,
+      processed_at: knex.fn.now(),
+    })
+    .returning(['id', 'original_name', 'stored_path', 'size_bytes', 'sha256', 'processed_at']);
+  return row || { id: row };
+}
+
+async function saveCccMetadata(file_id, meta) {
+  // Upsert by file_id
+  const exists = await knex('ccc_metadata').select('file_id').where({ file_id }).first();
+  const payload = {
+    file_id,
+    claim_number: meta?.claim_number || null,
+    vin: meta?.vin || null,
+    ro_number: meta?.ro_number || null,
+    customer_name: meta?.customer_name || null,
+    total_amount: meta?.total_amount ?? null,
+    raw_json: meta ? JSON.stringify(meta) : null,
+  };
+  if (exists) {
+    await knex('ccc_metadata').update(payload).where({ file_id });
+  } else {
+    await knex('ccc_metadata').insert(payload);
+  }
+}
+
+async function linkOrCreateClaimFromMeta(meta, fileRow, originName) {
+  if (!meta?.claim_number) return null;
+
+  // Try to find claim by claim_number
+  const existing = await knex('claims').select('id').where({ claim_number: meta.claim_number }).first();
+  let claimId = existing?.id || null;
+
+  if (!claimId && CLAIM_AUTOCREATE) {
+    const [created] = await knex('claims')
+      .insert({
+        claim_number: meta.claim_number,
+        status: 'new',
+      })
+      .returning(['id']);
+    claimId = created?.id ?? created;
+
+    await knex('workflow_events').insert({
+      claim_id: claimId,
+      type: 'claim_created_from_ingest',
+      detail: JSON.stringify({ source_file_sha: fileRow.sha256, original_name: originName }),
+    });
   }
 
-  (async () => {
-    while (!stop) {
-      await tick();
-      await sleep(intervalMs);
-    }
-  })();
+  if (claimId) {
+    await knex('ccc_files').update({ claim_id: claimId }).where({ id: fileRow.id });
+    await knex('workflow_events').insert({
+      claim_id: claimId,
+      type: 'ccc_file_linked',
+      detail: JSON.stringify({ ccc_file_id: fileRow.id, original_name: originName }),
+    });
+  }
 
-  return () => { stop = true; };
+  return claimId;
+}
+
+async function processOne(filename) {
+  const full = path.join(INCOMING_DIR, filename);
+  const buf = await fs.readFile(full);
+  const size = buf.length;
+  const sum = sha256(buf);
+
+  // Store in archive with sha prefix to avoid collisions
+  const storedName = `${sum.slice(0, 8)}_${filename}`;
+  const archivedPath = await moveToArchive(full, storedName);
+
+  // Persist ccc_files (idempotent by sha256)
+  const fileRow = await upsertCccFile({
+    original_name: filename,
+    stored_path: archivedPath,
+    size_bytes: size,
+    sha256sum: sum,
+  });
+
+  // Parse metadata
+  let meta = null;
+  try {
+    meta = await parseEMS(buf);
+  } catch (e) {
+    // still keep the file record; metadata can be null
+    await knex('workflow_events').insert({
+      claim_id: null,
+      type: 'ccc_parse_error',
+      detail: JSON.stringify({ error: String(e?.message || e), file_id: fileRow.id, original_name: filename }),
+    });
+  }
+
+  // Save metadata (even if partial)
+  await saveCccMetadata(fileRow.id, meta);
+
+  // Try to link/create claim by claim_number
+  await linkOrCreateClaimFromMeta(meta, fileRow, filename);
+}
+
+async function tick() {
+  const list = await listInbox();
+  for (const name of list) {
+    try {
+      await processOne(name);
+    } catch (e) {
+      // log and continue
+      await knex('workflow_events').insert({
+        claim_id: null,
+        type: 'ccc_ingest_error',
+        detail: JSON.stringify({ error: String(e?.message || e), original_name: name }),
+      });
+    }
+  }
+}
+
+export default function startCccIngestWorker() {
+  console.log(`[ccc-ingest] watching ${INCOMING_DIR} -> archiving to ${ARCHIVE_DIR} (every ${POLL_MS}ms)`);
+  ensureDir(INCOMING_DIR).catch(() => {});
+  ensureDir(ARCHIVE_DIR).catch(() => {});
+  const timer = setInterval(tick, POLL_MS);
+
+  return () => {
+    clearInterval(timer);
+  };
 }

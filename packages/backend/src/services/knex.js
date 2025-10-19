@@ -13,3 +13,5 @@ const db = knex({
   pool: { min: 0, max: 10 }
 });
 export default db;
+// Re-export the canonical knex client so all routes use the same instance
+export { default } from '../../db/knexClient.js';

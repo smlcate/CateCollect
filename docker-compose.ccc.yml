@@ -1,5 +1,4 @@
 # docker-compose.ccc.yml
-version: "3.9"
 services:
   sftp:
     image: atmoz/sftp:latest
@@ -10,3 +9,4 @@ services:
       - ./data/incoming:/home/${SFTP_USER}/upload
     ports:
       - "2222:22"
+    resart: unless-stopped
