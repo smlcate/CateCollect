@@ -23,6 +23,8 @@ import knex from '../db/knexClient.js'; // ✅ fixed: was ../db/knexClient.js
 
 const app = express();
 
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
 // Core middleware
 app.use('/api/uploads', uploadsRoutes);
 app.use(helmet());
