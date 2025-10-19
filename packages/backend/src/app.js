@@ -13,6 +13,8 @@ import documentsRoutes from './routes/documents.routes.js';
 import errorMw from './middleware/error.js';
 import uploadsRoutes from './routes/uploads.routes.js';
 import claimChecklistRoutes from './routes/claims.checklist.routes.js';
+import ingestUploadPage from './routes/ingest.uploadpage.js';
+import ingestEventsRoutes from './routes/ingest.events.routes.js';
 
 // --- CCC Ingest (routes/dashboard) ---
 import ingestApi from './routes/ingest.routes.js';
@@ -34,6 +36,8 @@ app.use('/api/carriers', carriersRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claimsChecklist', claimChecklistRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/ingest', ingestUploadPage());
+app.use('/api/ingest', ingestEventsRoutes());
 
 // ---------- CCC Ingest routes ----------
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
