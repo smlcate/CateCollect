@@ -21,23 +21,40 @@ export async function parseCCCFile(fullPath) {
 
   if (isXml) {
     try {
-      const xml = await parseStringPromise(raw, { explicitArray: false, ignoreAttrs: false });
+      const obj = await parseStringPromise(raw, { explicitArray: false });
+      // These paths are common but may vary by CCC export version/vendor
+      const claim =
+        obj?.RepairOrder?.Claim?.ClaimNumber ||
+        obj?.Estimate?.ClaimInfo?.ClaimNumber ||
+        obj?.Workfile?.Claim?.Number;
 
-      const claim   = xml?.Estimate?.Claim   || xml?.Claim   || {};
-      const insured = xml?.Estimate?.Insured || xml?.Insured || {};
-      const vehicle = xml?.Estimate?.Vehicle || xml?.Vehicle || {};
-      const totals  = xml?.Estimate?.Totals  || xml?.Totals  || {};
+      const name =
+        obj?.RepairOrder?.Customer?.Name ||
+        obj?.Estimate?.CustomerInfo?.CustomerName ||
+        obj?.Workfile?.Customer?.Name;
 
-      meta.claim_number = claim?.ClaimNumber || xml?.Estimate?.Header?.ClaimNumber || null;
-      meta.customer_name =
-        insured?.Name || [insured?.FirstName, insured?.LastName].filter(Boolean).join(' ') || null;
-      meta.vehicle_vin = vehicle?.VIN || vehicle?.Vin || null;
-      meta.total_amount = totals?.GrandTotal || totals?.TotalAmount || null;
-    } catch (_) {
-      // leave best-effort meta + raw_preview
+      const vin =
+        obj?.RepairOrder?.Vehicle?.VIN ||
+        obj?.Estimate?.VehicleInfo?.VIN ||
+        obj?.Workfile?.Vehicle?.VIN;
+
+      const total =
+        obj?.RepairOrder?.Totals?.GrandTotal ||
+        obj?.Estimate?.Totals?.GrandTotal ||
+        obj?.Workfile?.Totals?.GrandTotal;
+
+      if (claim) meta.claim_number = String(claim).trim();
+      if (name) meta.customer_name = String(name).trim();
+      if (vin) meta.vehicle_vin = String(vin).trim();
+      if (total) meta.total_amount = String(total).trim();
+      return meta;
+    } catch {
+      // fall through to EMS-style parsing
     }
-  } else {
-    // EMS heuristics
+  }
+
+  // EMS-style (line-oriented key|value pairs) heuristic extraction
+  {
     const vin = raw.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);
     if (vin) meta.vehicle_vin = vin[1];
 

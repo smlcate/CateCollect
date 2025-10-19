@@ -1,48 +1,43 @@
 // packages/backend/src/server.js
 import 'dotenv/config';
+import path from 'path';
+import fs from 'fs/promises';
 import app from './app.js';
-import startCccIngestWorker from './ingest/worker.js';
 
-const port = Number(process.env.PORT || 4000);
+// --- CCC Ingest worker ---
+import knex from '../db/knexClient.js';
+import { startCccIngestWorker } from './ingest/worker.js';
 
-// --- start HTTP server ---
-const server = app.listen(port, () => {
-  console.log(`API listening on :${port}`);
+const port = process.env.PORT || 4000;
+
+const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
+const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
+const POLL_MS      = Number(process.env.POLL_INTERVAL_MS || 5000);
+
+await fs.mkdir(INCOMING_DIR, { recursive: true }).catch(() => {});
+await fs.mkdir(ARCHIVE_DIR, { recursive: true }).catch(() => {});
+
+// Start ingest worker
+const stopIngest = startCccIngestWorker({
+  knex,
+  incomingDir: INCOMING_DIR,
+  archiveDir:  ARCHIVE_DIR,
+  intervalMs:  POLL_MS,
 });
 
-// --- start ingest worker (never crash the API if worker import/start fails) ---
-let stopWorker = null;
-try {
-  stopWorker = startCccIngestWorker?.();
-} catch (err) {
-  console.error('[ccc-ingest] failed to start worker:', err?.message || err);
-}
+const server = app.listen(port, () => {
+  console.log(`API listening on :${port}`);
+  console.log(`[ccc-ingest] watching ${INCOMING_DIR} -> archiving to ${ARCHIVE_DIR} (every ${POLL_MS}ms)`);
+});
 
-// --- graceful shutdown ---
-function shutdown(signal) {
+// Graceful shutdown
+function shutdown(signal = 'SIGTERM') {
   console.log(`[shutdown] ${signal} received`);
-  try {
-    if (typeof stopWorker === 'function') {
-      stopWorker();
-    }
-  } catch (e) {
-    console.warn('[shutdown] worker stop error:', e?.message || e);
-  }
+  try { stopIngest?.(); } catch {}
   server.close(() => {
     console.log('[shutdown] server closed');
     process.exit(0);
   });
 }
-
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
-
-// --- crash guards (log + exit; rely on process manager / docker to restart) ---
-process.on('unhandledRejection', (reason) => {
-  console.error('[fatal] Unhandled Rejection:', reason);
-  process.exit(1);
-});
-process.on('uncaughtException', (err) => {
-  console.error('[fatal] Uncaught Exception:', err);
-  process.exit(1);
-});
