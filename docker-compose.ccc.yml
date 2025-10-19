@@ -4,9 +4,9 @@ services:
     image: atmoz/sftp:latest
     env_file:
       - .env
-    command: "${SFTP_USER}:${SFTP_PASS}:1001"
+    command: "smlcate:ncmpTk88:1001"
     volumes:
-      - ./data/incoming:/home/${SFTP_USER}/upload
+      - ./data/incoming:/home/smlcate/upload
     ports:
       - "2222:22"
     restart: unless-stopped
