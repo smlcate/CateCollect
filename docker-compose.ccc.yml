@@ -9,4 +9,4 @@ services:
       - ./data/incoming:/home/${SFTP_USER}/upload
     ports:
       - "2222:22"
-    resart: unless-stopped
+    restart: unless-stopped

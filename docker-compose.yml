@@ -11,7 +11,7 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-    resart: unless-stopped
+    restart: unless-stopped
 
   backend:
     build: ./packages/backend
@@ -30,7 +30,7 @@ services:
       - "4000:4000"
     volumes:
       - ./data:/app/data
-    resart: unless-stopped
+    restart: unless-stopped
 
 volumes:
   pgdata:
