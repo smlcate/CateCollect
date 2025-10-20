@@ -13,6 +13,7 @@ import documentsRoutes from './routes/documents.routes.js';
 import errorMw from './middleware/error.js';
 import uploadsRoutes from './routes/uploads.routes.js';
 import claimChecklistRoutes from './routes/claims.checklist.routes.js';
+import ingestUploadPage from './routes/ingest.uploadpage.js';
 
 // --- CCC Ingest (routes/dashboard) ---
 import ingestApi from './routes/ingest.routes.js';
@@ -29,7 +30,7 @@ const isHttps = process.env.TRUST_HTTPS === '1';
 app.use(helmet({
   crossOriginOpenerPolicy: isHttps ? { policy: 'same-origin' } : false,
   originAgentCluster: isHttps ? true : false,
-  // keep Helmet defaults incl. strict CSP (no inline scripts)
+  // rest of helmet defaults
 }));
 
 // favicon noise-silencer (optional)
@@ -47,6 +48,7 @@ app.use('/api/carriers', carriersRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claimsChecklist', claimChecklistRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/ingest', ingestUploadPage());
 
 // ---------- CCC Ingest routes ----------
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');

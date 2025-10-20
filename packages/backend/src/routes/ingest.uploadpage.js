@@ -1,9 +1,9 @@
-// packages/backend/src/routes/ingest.uploadpage.js
 import express from 'express';
 
 export default function ingestUploadPage() {
   const r = express.Router();
 
+  // Simple, self-contained HTML upload page
   r.get('/upload', (_req, res) => {
     res.type('html').send(`<!doctype html>
 <html>
@@ -37,7 +37,7 @@ export default function ingestUploadPage() {
 </html>`);
   });
 
-  // External JS so Helmet’s CSP (script-src 'self') is satisfied
+  // External JS so Helmet CSP ('script-src self') is satisfied
   r.get('/upload.js', (_req, res) => {
     res.type('application/javascript').send(`
 (function(){
