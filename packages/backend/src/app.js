@@ -1,6 +1,7 @@
 // packages/backend/src/app.js
-// Express app with uniform Origin-Agent-Cluster, dev-safe CSP (no upgrade-insecure-requests in HTTP),
-// and ingest routes wired before static assets. Exports the app (server boot happens elsewhere).
+// Express app with uniform Origin-Agent-Cluster and a dev-safe CSP
+// (no auto HTTPS upgrade unless TRUST_HTTPS=1). Exports the app;
+// server boot/listen happens elsewhere (e.g., server.js).
 
 import express from 'express';
 import cors from 'cors';
@@ -58,7 +59,8 @@ const cspDirectives = {
   "frame-ancestors": ["'none'"],
   "object-src": ["'none'"],
   "script-src-attr": ["'none'"],
-  ...(TRUST_HTTPS ? { "upgrade-insecure-requests": [] } : {}) // only when actually behind TLS
+  // Only enable upgrade-insecure-requests when truly behind TLS
+  ...(TRUST_HTTPS ? { "upgrade-insecure-requests": [] } : {})
 };
 
 app.use(helmet({
