@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
+import { XMLParser } from 'fast-xml-parser';
 
 // NOTE: ESM-safe __dirname
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,14 @@ export default function ingestApi(knex) {
     return candidate;
   }
 
+  async function resolveFileFullPath(row) {
+    const p = (row?.archived_path || row?.stored_path || '').toString().trim();
+    if (!p) return null;
+    const isAbs = path.isAbsolute(p);
+    const full = isAbs ? p : path.join(ARCHIVE_DIR, p);
+    try { await fs.access(full); } catch { return null; }
+    return full;
+  }
   // ---------------------------
   // GET /health
   // ---------------------------
@@ -258,10 +267,79 @@ export default function ingestApi(knex) {
   router.post('/files/:id/reprocess', async (req, res, next) => {
     try {
       const id = Number(req.params.id);
-      if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+      if (!Number.isFinite(id)) return res.status(400).json({ ok:false, error:'invalid_id' });
 
-      // TODO: enqueue a re-parse job; for now, just acknowledge
-      res.json({ ok: true, message: 'Reprocess enqueued (placeholder)', id });
+      // fetch file row
+      const f = await knex('ccc_files').where({ id }).first();
+      if (!f) return res.status(404).json({ ok:false, error:'not_found' });
+
+      const full = await resolveFileFullPath(f);
+      if (!full) return res.status(404).json({ ok:false, error:'file_missing' });
+
+      // read + parse (XML/EMS text)
+      const buf = await fs.readFile(full);
+      const text = buf.toString('utf8');
+
+      // Fast-XML-Parser config: tolerate slightly messy XML
+      const parser = new XMLParser({
+        ignoreDeclaration: true,
+        trimValues: true,
+        ignoreAttributes: false,
+        attributeNamePrefix: '@',
+        allowBooleanAttributes: true,
+        parseTagValue: true,
+      });
+
+      let raw = null;
+      try { raw = parser.parse(text); }
+      catch { /* keep raw = null; */ }
+
+      // very lightweight extraction with multiple possible tag names
+      const pick = (...paths) => {
+        for (const p of paths) {
+          const parts = p.split('.');
+          let v = raw;
+          for (const k of parts) v = v?.[k];
+          if (v != null && v !== '') return String(v);
+        }
+        return null;
+      };
+
+      // attempt common tag names (tweak later for your exact CCC schema)
+      const claim_number = pick('claim.claim_number', 'Claim.ClaimNumber', 'root.claimNumber', 'estimate.claimID');
+      const vin          = pick('claim.vin', 'Claim.Vehicle.VIN', 'root.VIN', 'estimate.vehicle.VIN');
+      const ro_number    = pick('claim.ro_number', 'Claim.RepairOrderNumber', 'root.roNumber');
+      const customer     = pick('claim.customer_name', 'Claim.Customer.Name', 'root.customer', 'estimate.customer.name');
+      const amtRaw       = pick('claim.total_amount', 'Claim.TotalAmount', 'estimate.totals.grandTotal');
+      const total_amount = amtRaw != null ? Number(String(amtRaw).replace(/[^0-9.]/g, '')) : null;
+
+      // upsert into ccc_metadata (jsonb raw for later debugging)
+      const payload = {
+        file_id: id,
+        claim_number,
+        vin,
+        ro_number,
+        customer_name: customer,
+        total_amount: isFinite(total_amount) ? total_amount : null,
+        raw_json: raw ? JSON.stringify(raw) : null,
+      };
+
+      await knex('ccc_metadata')
+        .insert(payload)
+        .onConflict('file_id')
+        .merge(payload);
+
+      // return the merged view like your GET /files/:id
+      const out = await knex('ccc_files as f')
+        .leftJoin('ccc_metadata as m', 'm.file_id', 'f.id')
+        .select(
+          'f.id','f.original_name','f.archived_path','f.stored_path','f.size_bytes','f.sha256','f.processed_at',
+          'm.claim_number','m.vin','m.ro_number','m.customer_name','m.total_amount'
+        )
+        .where('f.id', id)
+        .first();
+
+      res.json({ ok:true, file: out });
     } catch (err) {
       next(err);
     }
