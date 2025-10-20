@@ -1,7 +1,6 @@
 // packages/backend/src/app.js
-// Express app with uniform Origin-Agent-Cluster and a dev-safe CSP
-// (no auto HTTPS upgrade unless TRUST_HTTPS=1). Exports the app;
-// server boot/listen happens elsewhere (e.g., server.js).
+// Express app with uniform Origin-Agent-Cluster and a dev-safe CSP.
+// No auto HTTPS upgrade unless TRUST_HTTPS=1. Exports the app.
 
 import express from 'express';
 import cors from 'cors';
@@ -41,30 +40,26 @@ const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data'
 const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
 
 // ---------- Security headers (Helmet) ----------
-const defaultCsp = helmet.contentSecurityPolicy.getDefaultDirectives();
-
-// Helmet’s defaults include "upgrade-insecure-requests"; remove it in HTTP dev to prevent auto-HTTPS.
-if (!TRUST_HTTPS && 'upgrade-insecure-requests' in defaultCsp) {
-  delete defaultCsp['upgrade-insecure-requests'];
-}
-
-const cspDirectives = {
-  ...defaultCsp,
-  "script-src": ["'self'"],
-  "style-src": ["'self'", "'unsafe-inline'"],
-  "img-src": ["'self'", "data:"],
-  "connect-src": ["'self'"],
-  "form-action": ["'self'"],
-  "base-uri": ["'self'"],
-  "frame-ancestors": ["'none'"],
-  "object-src": ["'none'"],
-  "script-src-attr": ["'none'"],
-  // Only enable upgrade-insecure-requests when truly behind TLS
-  ...(TRUST_HTTPS ? { "upgrade-insecure-requests": [] } : {})
-};
-
+// Turn off Helmet defaults and specify only what we want.
+// This guarantees *no* 'upgrade-insecure-requests' in dev.
 app.use(helmet({
-  contentSecurityPolicy: { directives: cspDirectives },
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      "default-src": ["'self'"],
+      "base-uri": ["'self'"],
+      "form-action": ["'self'"],
+      "frame-ancestors": ["'none'"],
+      "object-src": ["'none'"],
+      "script-src": ["'self'"],
+      "script-src-attr": ["'none'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", "data:"],
+      "connect-src": ["'self'"],
+      // Only enable auto-upgrade when truly behind TLS:
+      ...(TRUST_HTTPS ? { "upgrade-insecure-requests": [] } : {}),
+    }
+  },
   crossOriginOpenerPolicy: TRUST_HTTPS ? { policy: 'same-origin' } : false,
   crossOriginResourcePolicy: { policy: 'same-origin' },
   hsts: TRUST_HTTPS ? { maxAge: 15552000 } : false, // no HSTS in HTTP dev
