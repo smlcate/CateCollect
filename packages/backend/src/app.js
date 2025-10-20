@@ -25,6 +25,13 @@ import knex from '../db/knexClient.js';
 
 const app = express();
 
+// --- Uniform Agent Clusters across ALL responses ---
+app.use((req, res, next) => {
+  // Avoid mixing site-keyed and origin-keyed clusters
+  res.setHeader('Origin-Agent-Cluster', '?1');
+  next();
+});
+
 // ----------------- ENV & paths (MUST be before using them) -----------------
 const TRUST_HTTPS = process.env.TRUST_HTTPS === '1';
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
@@ -58,6 +65,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 
+// Minimal favicon to avoid 404 noise in console during dev
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
 // ----------------- API routes -----------------
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/uploads', uploadsRoutes);
@@ -86,32 +96,16 @@ function hasIndex(dir) {
 function resolveFrontendDir() {
   if (process.env.FRONTEND_DIR && hasIndex(process.env.FRONTEND_DIR)) return process.env.FRONTEND_DIR;
   const candidates = [
-    path.resolve(__dirname, '../../web'),
-    path.resolve(__dirname, '../../../web'),
-    path.resolve(process.cwd(), 'web'),
-    path.resolve(process.cwd(), 'CateCollect/web'),
+    path.join(process.cwd(), 'web'),
+    path.join(__dirname, '..', 'web'),
   ];
   for (const c of candidates) if (hasIndex(c)) return c;
   return null;
 }
 
 const FRONTEND_DIR = resolveFrontendDir();
-
-// ----------------- Static / SPA fallback (LAST) -----------------
 if (FRONTEND_DIR) {
-  console.log('[frontend] Serving from:', FRONTEND_DIR);
-
-  app.use('/', express.static(FRONTEND_DIR, { fallthrough: true, maxAge: '1d' }));
-
-  if (process.env.NODE_ENV !== 'production') {
-    const NODE_MODULES_DIR = path.resolve(FRONTEND_DIR, 'node_modules');
-    if (fs.existsSync(NODE_MODULES_DIR)) {
-      console.log('[frontend] Exposing node_modules at /node_modules ->', NODE_MODULES_DIR);
-      app.use('/node_modules', express.static(NODE_MODULES_DIR, { fallthrough: true, maxAge: '7d' }));
-    }
-  }
-
-  // Important: let /api/* and /ingest/* pass through; fallback only for SPA paths
+  app.use(express.static(FRONTEND_DIR, { fallthrough: true }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
     if (req.path.startsWith('/ingest/')) return next();
