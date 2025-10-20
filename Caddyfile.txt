@@ -1,0 +1,20 @@
+{
+	# Optional: receive ACME/Let's Encrypt notices
+	email smlcate@yahoo.com
+}
+
+http://159.203.116.26:4000/ {
+	encode gzip
+
+	# Optional security headers (complement Helmet)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+	}
+
+	# Proxy all traffic to Node backend service/port
+	reverse_proxy backend:4000
+}

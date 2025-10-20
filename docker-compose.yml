@@ -18,6 +18,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      TRUST_HTTPS: "1"
       # Point knex to the internal db service
       PGHOST: db
       PGPORT: 5432
