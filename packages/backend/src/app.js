@@ -27,15 +27,31 @@ app.set('trust proxy', 1);
 
 /** Helmet under proxy/HTTPS: keep strict CSP; disable COOP/OAC only when not HTTPS */
 const isHttps = process.env.TRUST_HTTPS === '1';
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'"],                 // our upload page uses external /ingest/upload.js
+  styleSrc: ["'self'", "'unsafe-inline'"], // small inline style in upload page
+  imgSrc: ["'self'", "data:"],
+  connectSrc: ["'self'"],
+  formAction: ["'self'"],                // allow form POST to same-origin http
+  baseUri: ["'self'"],
+  frameAncestors: ["'none'"],
+};
+if (isHttps) {
+  // only tell the browser to auto-upgrade when reverse-proxied with real TLS
+  cspDirectives.upgradeInsecureRequests = [];
+}
+
 app.use(helmet({
+  contentSecurityPolicy: { directives: cspDirectives },
   crossOriginOpenerPolicy: isHttps ? { policy: 'same-origin' } : false,
   originAgentCluster: isHttps ? true : false,
-  // rest of helmet defaults
+  // don't send HSTS on plain HTTP
+  hsts: isHttps ? undefined : false,
 }));
 
-// favicon noise-silencer (optional)
+// (optional) quiet the favicon error
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
-
 // core middleware
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
