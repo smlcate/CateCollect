@@ -13,38 +13,44 @@ import documentsRoutes from './routes/documents.routes.js';
 import errorMw from './middleware/error.js';
 import uploadsRoutes from './routes/uploads.routes.js';
 import claimChecklistRoutes from './routes/claims.checklist.routes.js';
-import ingestUploadPage from './routes/ingest.uploadpage.js';
-import ingestEventsRoutes from './routes/ingest.events.routes.js';
 
 // --- CCC Ingest (routes/dashboard) ---
 import ingestApi from './routes/ingest.routes.js';
 import ingestDashboard from './routes/ingest.dashboard.js';
-import knex from '../db/knexClient.js'; // ✅ fixed: was ../db/knexClient.js
+import knex from '../db/knexClient.js';
 
 const app = express();
 
+/** behind Caddy/HTTPS we trust the proxy so req.protocol etc. are correct */
+app.set('trust proxy', 1);
+
+/** Helmet under proxy/HTTPS: keep strict CSP; disable COOP/OAC only when not HTTPS */
+const isHttps = process.env.TRUST_HTTPS === '1';
+app.use(helmet({
+  crossOriginOpenerPolicy: isHttps ? { policy: 'same-origin' } : false,
+  originAgentCluster: isHttps ? true : false,
+  // keep Helmet defaults incl. strict CSP (no inline scripts)
+}));
+
+// favicon noise-silencer (optional)
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
-// Core middleware
-app.use('/api/uploads', uploadsRoutes);
-app.use(helmet());
+// core middleware
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 
 // ---------- API routes ----------
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.use('/api/uploads', uploadsRoutes);
 app.use('/api/carriers', carriersRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claimsChecklist', claimChecklistRoutes);
 app.use('/api/documents', documentsRoutes);
-app.use('/ingest', ingestUploadPage());
-app.use('/api/ingest', ingestEventsRoutes());
 
 // ---------- CCC Ingest routes ----------
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
 const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
-
 app.use('/api/ingest', ingestApi(knex));
 app.use('/ingest', ingestDashboard(knex, { incomingDir: INCOMING_DIR, archiveDir: ARCHIVE_DIR }));
 
@@ -59,8 +65,8 @@ function hasIndex(dir) {
 function resolveFrontendDir() {
   if (process.env.FRONTEND_DIR && hasIndex(process.env.FRONTEND_DIR)) return process.env.FRONTEND_DIR;
   const candidates = [
-    path.resolve(__dirname, '../../web'),
-    path.resolve(__dirname, '../../../web'),
+    path.resolve(__dirname, '../../web'),        // monorepo default
+    path.resolve(__dirname, '../../../web'),     // sibling of repo root
     path.resolve(process.cwd(), 'web'),
     path.resolve(process.cwd(), 'CateCollect/web'),
   ];
@@ -73,8 +79,11 @@ const FRONTEND_DIR = resolveFrontendDir();
 // ---------- Static serving ----------
 if (FRONTEND_DIR) {
   console.log('[frontend] Serving from:', FRONTEND_DIR);
+
+  // Serve app assets
   app.use('/', express.static(FRONTEND_DIR, { fallthrough: true, maxAge: '1d' }));
 
+  // Serve node_modules only in development
   if (process.env.NODE_ENV !== 'production') {
     const NODE_MODULES_DIR = path.resolve(FRONTEND_DIR, 'node_modules');
     if (fs.existsSync(NODE_MODULES_DIR)) {
@@ -85,6 +94,7 @@ if (FRONTEND_DIR) {
     }
   }
 
+  // SPA fallback: serve index.html for non-API routes
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
