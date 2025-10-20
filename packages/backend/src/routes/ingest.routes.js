@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import { XMLParser } from 'fast-xml-parser';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,7 +18,6 @@ export default function ingestApi(knex) {
     return path.isAbsolute(p) ? p : path.join(ARCHIVE_DIR, p);
   };
 
-  // Health
   router.get('/health', async (_req, res, next) => {
     try {
       const pollMs = Number(process.env.POLL_INTERVAL_MS || 5000);
@@ -25,16 +25,17 @@ export default function ingestApi(knex) {
         .select(['id','original_name','stored_path','archived_path','processed_at','sha256'])
         .orderBy([{ column:'processed_at', order:'desc' }, { column:'id', order:'desc' }])
         .first();
+
       let inboxCount = 0;
       try {
         const entries = await fs.readdir(INCOMING_DIR, { withFileTypes: true });
         inboxCount = entries.filter(e => e.isFile()).length;
       } catch {}
+
       res.json({ ok:true, interval_ms: pollMs, incoming_dir: INCOMING_DIR, inbox_count: inboxCount, last_processed: last || null });
     } catch (err) { next(err); }
   });
 
-  // List (?flat=1 for array)
   router.get('/files', async (req, res, next) => {
     try {
       const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
@@ -53,7 +54,7 @@ export default function ingestApi(knex) {
         .limit(limit).offset(offset);
 
       if (q) {
-        base.where(qb=>{
+        baseQuery.where(qb=>{
           qb.whereILike('f.original_name', `%${q}%`)
             .orWhereILike('m.claim_number', `%${q}%`)
             .orWhereILike('m.vin', `%${q}%`)
@@ -62,13 +63,13 @@ export default function ingestApi(knex) {
         });
       }
 
-      const rows = await base;
+      const rows = await baseQuery;
       if (flat) return res.json(rows);
 
-      const countQ = knex('ccc_files as f').leftJoin('ccc_metadata as m','m.file_id','f.id')
+      const countQuery = knex('ccc_files as f').leftJoin('ccc_metadata as m', 'm.file_id', 'f.id')
         .countDistinct({ total: 'f.id' }).first();
       if (q) {
-        countQ.where(qb=>{
+        countQuery.where(qb=>{
           qb.whereILike('f.original_name', `%${q}%`)
             .orWhereILike('m.claim_number', `%${q}%`)
             .orWhereILike('m.vin', `%${q}%`)
@@ -76,12 +77,11 @@ export default function ingestApi(knex) {
             .orWhereILike('m.customer_name', `%${q}%`);
         });
       }
-      const total = Number((await countQ)?.total || 0);
+      const total = Number((await countQuery)?.total || 0);
       res.json({ ok:true, total, limit, offset, items: rows });
     } catch (err) { next(err); }
   });
 
-  // Detail
   router.get('/files/:id', async (req, res, next) => {
     try {
       const id = Number(req.params.id);
@@ -109,35 +109,37 @@ export default function ingestApi(knex) {
     } catch (err) { next(err); }
   });
 
-  // Raw
   router.get('/files/:id/raw', async (req, res, next) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ ok:false, error:'invalid_id' });
       const row = await knex('ccc_files').where({ id }).first();
       if (!row) return res.status(404).json({ ok:false, error:'not_found' });
+
       const full = resolveArchivedPath(row);
       if (!full) return res.status(404).json({ ok:false, error:'file_missing' });
       try { await fs.access(full); } catch { return res.status(404).json({ ok:false, error:'file_missing' }); }
+
       res.sendFile(full);
     } catch (err) { next(err); }
   });
 
-  // Download
   router.get('/files/:id/download', async (req, res, next) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ ok:false, error:'invalid_id' });
       const row = await knex('ccc_files').where({ id }).first();
       if (!row) return res.status(404).json({ ok:false, error:'not_found' });
+
       const full = resolveArchivedPath(row);
       if (!full) return res.status(404).json({ ok:false, error:'file_missing' });
       try { await fs.access(full); } catch { return res.status(404).json({ ok:false, error:'file_missing' }); }
+
       res.download(full, row.original_name || path.basename(full));
     } catch (err) { next(err); }
   });
 
-  // Reprocess: parse XML/EMS → upsert ccc_metadata
+  // REAL reprocess: parse XML/EMS and upsert into ccc_metadata
   router.post('/files/:id/reprocess', async (req, res, next) => {
     try {
       const id = Number(req.params.id);
@@ -151,20 +153,17 @@ export default function ingestApi(knex) {
 
       const text = (await fs.readFile(full)).toString('utf8');
 
-      // <-- dynamic import so server doesn't crash if missing at boot
-      let XMLParser;
-      try { ({ XMLParser } = await import('fast-xml-parser')); }
-      catch (e) {
-        return res.status(501).json({ ok:false, error:'parser_not_installed', detail:String(e && e.message || e) });
-      }
-
       const parser = new XMLParser({
-        ignoreDeclaration: true, trimValues: true,
-        ignoreAttributes: false, attributeNamePrefix: '@',
-        allowBooleanAttributes: true, parseTagValue: true,
+        ignoreDeclaration: true,
+        trimValues: true,
+        ignoreAttributes: false,
+        attributeNamePrefix: '@',
+        allowBooleanAttributes: true,
+        parseTagValue: true,
       });
 
-      let raw = null; try { raw = parser.parse(text); } catch { raw = null; }
+      let raw = null;
+      try { raw = parser.parse(text); } catch { raw = null; }
 
       const pick = (...paths) => {
         for (const p of paths) {
@@ -176,11 +175,12 @@ export default function ingestApi(knex) {
         return null;
       };
 
-      const claim_number = pick('claim.claim_number','Claim.ClaimNumber','root.claimNumber','estimate.claimID');
-      const vin          = pick('claim.vin','Claim.Vehicle.VIN','root.VIN','estimate.vehicle.VIN');
-      const ro_number    = pick('claim.ro_number','Claim.RepairOrderNumber','root.roNumber');
-      const customer     = pick('claim.customer_name','Claim.Customer.Name','root.customer','estimate.customer.name');
-      const amtRaw       = pick('claim.total_amount','Claim.TotalAmount','estimate.totals.grandTotal');
+      // candidate tag paths (both simple and CCC-ish)
+      const claim_number = pick('claim.claim_number', 'Claim.ClaimNumber', 'root.claimNumber', 'estimate.claimID');
+      const vin          = pick('claim.vin',           'Claim.Vehicle.VIN', 'root.VIN',         'estimate.vehicle.VIN');
+      const ro_number    = pick('claim.ro_number',     'Claim.RepairOrderNumber', 'root.roNumber');
+      const customer     = pick('claim.customer_name', 'Claim.Customer.Name', 'root.customer', 'estimate.customer.name');
+      const amtRaw       = pick('claim.total_amount',  'Claim.TotalAmount', 'estimate.totals.grandTotal');
       const total_amount = amtRaw != null ? Number(String(amtRaw).replace(/[^0-9.]/g, '')) : null;
 
       const payload = {

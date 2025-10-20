@@ -1,22 +1,20 @@
-// Minimal, self-contained upload page + its JS, with correct MIME types.
-// No frameworks, no CDNs, HTTP-friendly.
+// packages/backend/src/routes/ingest.uploadpage.js
+import express from 'express';
 
-import { Router } from 'express';
+const router = express.Router();
 
 export default function ingestUploadPage() {
-  const r = Router();
-
-  // HTML page
-  r.get('/upload', (_req, res) => {
+  // HTML shell
+  router.get('/upload', (_req, res) => {
     res
-      .type('html') // => Content-Type: text/html; charset=utf-8
+      .type('html')
+      .set('Cache-Control', 'no-store')
       .send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>CateCollect — Upload</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- No COOP/HSTS needs here; Helmet handles headers -->
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
     .box { max-width: 560px; margin: 0 auto; padding: 1rem 1.25rem; border: 1px solid #ddd; border-radius: 12px; }
@@ -34,49 +32,61 @@ export default function ingestUploadPage() {
 </head>
 <body>
   <div class="box">
-    <h1>Upload to CateCollect</h1>
-    <p class="hint">Allowed: <code>.ems</code>, <code>.xml</code>, <code>.pdf</code>, <code>.jpg</code>, <code>.png</code>, <code>.docx</code>, <code>.xlsx</code> (max ~25MB, configurable)</p>
-    <form id="uform">
+    <h1>Upload to Ingest</h1>
+    <p class="hint">Files here go straight to the ingest inbox. Use <code>/ingest/</code> to see processed files.</p>
+
+    <form id="f">
+      <input id="file" type="file" required />
       <div class="row">
-        <input id="file" name="file" type="file" required />
         <button type="submit">Upload</button>
+        <span id="status" class="hint"></span>
       </div>
     </form>
-    <div id="out"></div>
+
+    <pre id="out"></pre>
   </div>
-  <script src="/ingest/upload.js" async></script>
+
+  <script src="/ingest/upload.js" defer></script>
 </body>
 </html>`);
   });
 
-  // The JS itself (served with the correct MIME type)
-  r.get('/upload.js', (_req, res) => {
+  // JS (no-store so browsers don't cache old code)
+  router.get('/upload.js', (_req, res) => {
     res
-      .type('application/javascript; charset=utf-8') // => Content-Type: application/javascript
+      .type('application/javascript')
+      .set('Cache-Control', 'no-store')
       .send(`(function(){
-  const $ = sel => document.querySelector(sel);
-  const out = $('#out');
-  const form = $('#uform');
-  form.addEventListener('submit', async (e) => {
+  'use strict';
+  const f = document.getElementById('f');
+  const fi = document.getElementById('file');
+  const out = document.getElementById('out');
+  const status = document.getElementById('status');
+
+  function esc(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  f.addEventListener('submit', async (e) => {
     e.preventDefault();
-    out.textContent = 'Uploading…';
-    const fd = new FormData(form);
+    if (!fi.files || !fi.files[0]) { alert('Choose a file'); return; }
+    status.textContent = 'Uploading…';
+    out.textContent = '';
+
+    const fd = new FormData();
+    fd.append('file', fi.files[0]);
+
     try {
-      const resp = await fetch('/api/uploads?scope=ingest', { method:'POST', body: fd });
-      const text = await resp.text();
-      let data;
-      try { data = JSON.parse(text); } catch { data = { ok:false, raw:text }; }
-      if (resp.ok && data && data.ok) {
-        out.innerHTML = '<p class="ok">Uploaded!</p><pre>'+JSON.stringify(data, null, 2)+'</pre>';
-      } else {
-        out.innerHTML = '<p class="err">Upload failed</p><pre>'+JSON.stringify(data || {status:resp.status, text}, null, 2)+'</pre>';
-      }
+      // IMPORTANT: post to ingest scope so the worker picks it up
+      const res = await fetch('/api/uploads?scope=ingest', { method: 'POST', body: fd });
+      const json = await res.json();
+      status.textContent = res.ok ? 'Uploaded ✓' : 'Upload failed';
+      out.innerHTML = '<span class="'+(res.ok?'ok':'err')+'"></span>'+esc(JSON.stringify(json, null, 2));
     } catch (err) {
-      out.innerHTML = '<p class="err">Network error</p><pre>'+String(err)+'</pre>';
+      status.textContent = 'Upload failed';
+      out.textContent = esc(String(err));
     }
   });
 })();`);
   });
 
-  return r;
+  return router;
 }
