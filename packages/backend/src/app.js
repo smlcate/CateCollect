@@ -88,8 +88,11 @@ app.use('/api/carriers', carriersRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claimsChecklist', claimChecklistRoutes);
 app.use('/api/documents', documentsRoutes);
-app.use('/ingest', ingestUploadPage());
+app.use('/api/ingest', ingestApi(knex));
+app.use('/ingest', ingestDashboard(knex, { incomingDir: INCOMING_DIR, archiveDir: ARCHIVE_DIR }));
 
+// >>> mount the simple upload page router here <<<
+app.use('/ingest', ingestUploadPage());
 // ---------- CCC Ingest routes ----------
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
 const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
@@ -137,8 +140,11 @@ if (FRONTEND_DIR) {
   }
 
   // SPA fallback: serve index.html for non-API routes
+  // SPA fallback LAST
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
+    // also let /ingest/* be handled by our routers
+    if (req.path.startsWith('/ingest/')) return next();
     res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
   });
 } else {
