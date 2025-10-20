@@ -27,30 +27,54 @@ app.set('trust proxy', 1);
 
 /** Helmet under proxy/HTTPS: keep strict CSP; disable COOP/OAC only when not HTTPS */
 const isHttps = process.env.TRUST_HTTPS === '1';
+// Build CSP by hand. IMPORTANT: no `upgrade-insecure-requests` on HTTP.
 const cspDirectives = {
-  defaultSrc: ["'self'"],
-  scriptSrc: ["'self'"],                 // our upload page uses external /ingest/upload.js
-  styleSrc: ["'self'", "'unsafe-inline'"], // small inline style in upload page
-  imgSrc: ["'self'", "data:"],
-  connectSrc: ["'self'"],
-  formAction: ["'self'"],                // allow form POST to same-origin http
-  baseUri: ["'self'"],
-  frameAncestors: ["'none'"],
+  "default-src": ["'self'"],
+  "script-src": ["'self'"],                 // upload page loads /ingest/upload.js (external file)
+  "style-src": ["'self'", "'unsafe-inline'"], // tiny inline <style> in the page
+  "img-src": ["'self'", "data:"],
+  "connect-src": ["'self'"],
+  "form-action": ["'self'"],                // allow POST to same-origin http
+  "base-uri": ["'self'"],
+  "frame-ancestors": ["'none'"],
+  "font-src": ["'self'", "data:"],
+  "object-src": ["'none'"],
+  "script-src-attr": ["'none'"],
 };
-if (isHttps) {
-  // only tell the browser to auto-upgrade when reverse-proxied with real TLS
-  cspDirectives.upgradeInsecureRequests = [];
-}
 
+// Only add upgrade-insecure-requests when truly behind TLS (via reverse proxy)
+if (isHttps) cspDirectives["upgrade-insecure-requests"] = [];
+
+// Use Helmet with NO CSP defaults so our directives are the only ones applied
 app.use(helmet({
-  contentSecurityPolicy: { directives: cspDirectives },
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: cspDirectives,
+  },
+  // Don’t send HSTS on plain HTTP
+  hsts: isHttps ? undefined : false,
+
+  // COOP & origin agent cluster only on HTTPS; disable on HTTP to silence console noise
   crossOriginOpenerPolicy: isHttps ? { policy: 'same-origin' } : false,
   originAgentCluster: isHttps ? true : false,
-  // don't send HSTS on plain HTTP
-  hsts: isHttps ? undefined : false,
 }));
 
-// (optional) quiet the favicon error
+// After the helmet() call
+if (!isHttps) {
+  app.use((req, res, next) => {
+    // Replace any prior CSP with our exact one (no upgrade-insecure-requests)
+    const csp = Object.entries(cspDirectives)
+      .map(([k, v]) => Array.isArray(v) ? `${k} ${v.join(' ')}` : k)
+      .join(';');
+    res.removeHeader('Content-Security-Policy');
+    res.setHeader('Content-Security-Policy', csp);
+    res.removeHeader('Strict-Transport-Security');
+    next();
+  });
+}
+
+
+// Optional: avoid 404 noise for favicon
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 // core middleware
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
