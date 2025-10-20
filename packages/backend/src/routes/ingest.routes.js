@@ -1,4 +1,4 @@
-// packages/backend/src/routes/ingest.routes.js
+// ingest.routes.js (ESM, safe dynamic-import parser)
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
@@ -43,7 +43,7 @@ export default function ingestApi(knex) {
       const q = (req.query.q || '').toString().trim();
       const flat = ['1','true','yes'].includes(String(req.query.flat||'').toLowerCase());
 
-      const baseQuery = knex('ccc_files as f')
+      const base = knex('ccc_files as f')
         .leftJoin('ccc_metadata as m', 'm.file_id', 'f.id')
         .select(
           'f.id','f.original_name','f.stored_path','f.archived_path','f.size_bytes',
