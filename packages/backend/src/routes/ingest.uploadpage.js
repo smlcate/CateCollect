@@ -62,7 +62,7 @@ export default function ingestUploadPage() {
     out.textContent = 'Uploading…';
     const fd = new FormData(form);
     try {
-      const resp = await fetch('/api/uploads', { method:'POST', body: fd });
+      const resp = await fetch('/api/uploads?scope=ingest', { method:'POST', body: fd });
       const text = await resp.text();
       let data;
       try { data = JSON.parse(text); } catch { data = { ok:false, raw:text }; }
