@@ -2,6 +2,11 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { createReadStream } from 'fs';
+
+// NOTE: ESM-safe __dirname
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Factory: pass in your knex instance
@@ -9,6 +14,23 @@ import fs from 'fs/promises';
  */
 export default function ingestApi(knex) {
   const router = express.Router();
+
+  // Where archived files live (relative paths are resolved against this)
+  const ARCHIVE_DIR = process.env.ARCHIVE_DIR || path.join(process.cwd(), 'data', 'archive');
+
+  // Safely resolve an archived file path for a DB row
+  function resolveArchivedPath(row) {
+    // Prefer archived_path; fall back to stored_path for legacy rows
+    const p = (row?.archived_path || row?.stored_path || '').toString().trim();
+    if (!p) return null;
+
+    // If p is absolute, use it; otherwise resolve within ARCHIVE_DIR
+    const candidate = path.resolve(path.isAbsolute(p) ? p : path.join(ARCHIVE_DIR, p));
+    const base = path.resolve(ARCHIVE_DIR);
+    // Prevent path traversal: ensure the resolved path is under ARCHIVE_DIR when p is relative
+    if (!candidate.startsWith(base) && !path.isAbsolute(p)) return null;
+    return candidate;
+  }
 
   // ---------------------------
   // GET /health
@@ -20,7 +42,7 @@ export default function ingestApi(knex) {
 
       // last processed file
       const last = await knex('ccc_files')
-        .select(['id', 'original_name', 'stored_path', 'processed_at', 'sha256'])
+        .select(['id', 'original_name', 'stored_path', 'archived_path', 'processed_at', 'sha256'])
         .orderBy([{ column: 'processed_at', order: 'desc' }, { column: 'id', order: 'desc' }])
         .first();
 
@@ -28,7 +50,7 @@ export default function ingestApi(knex) {
       let inboxCount = 0;
       try {
         const entries = await fs.readdir(incomingDir, { withFileTypes: true });
-        inboxCount = entries.filter(e => e.isFile() && /\.(ems|xml)$/i.test(e.name)).length;
+        inboxCount = entries.filter(e => e.isFile() && /\.(ems|xml|txt|pdf)$/i.test(e.name)).length;
       } catch {
         // dir may not exist yet
       }
@@ -42,6 +64,7 @@ export default function ingestApi(knex) {
           id: last.id,
           original_name: last.original_name,
           stored_path: last.stored_path,
+          archived_path: last.archived_path,
           processed_at: last.processed_at,
           sha256: last.sha256,
         } : null,
@@ -54,12 +77,14 @@ export default function ingestApi(knex) {
   // ---------------------------
   // GET /files  (list with pagination + search)
   //   ?limit=50&offset=0&q=vin or claim
+  //   ?flat=1  -> return a plain array instead of {ok,total,items}
   // ---------------------------
   router.get('/files', async (req, res, next) => {
     try {
       const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
       const offset = Math.max(0, Number(req.query.offset) || 0);
       const q = (req.query.q || '').toString().trim();
+      const flat = ['1', 'true', 'yes'].includes(String(req.query.flat || '').toLowerCase());
 
       const baseQuery = knex('ccc_files as f')
         .leftJoin('ccc_metadata as m', 'm.file_id', 'f.id')
@@ -67,6 +92,7 @@ export default function ingestApi(knex) {
           'f.id',
           'f.original_name',
           'f.stored_path',
+          'f.archived_path',
           'f.size_bytes',
           'f.sha256',
           'f.processed_at',
@@ -91,6 +117,10 @@ export default function ingestApi(knex) {
       }
 
       const rows = await baseQuery;
+
+      if (flat) {
+        return res.json(rows);
+      }
 
       // total for pagination
       const countQuery = knex('ccc_files as f')
@@ -128,6 +158,7 @@ export default function ingestApi(knex) {
           'f.id',
           'f.original_name',
           'f.stored_path',
+          'f.archived_path',
           'f.size_bytes',
           'f.sha256',
           'f.processed_at',
@@ -148,7 +179,7 @@ export default function ingestApi(knex) {
       try {
         raw = file.raw_json ? JSON.parse(file.raw_json) : null;
       } catch {
-        raw = file.raw_json; // return as-is if it’s not valid JSON
+        raw = file.raw_json; // return as-is if invalid JSON
       }
 
       res.json({
@@ -157,6 +188,7 @@ export default function ingestApi(knex) {
           id: file.id,
           original_name: file.original_name,
           stored_path: file.stored_path,
+          archived_path: file.archived_path,
           size_bytes: file.size_bytes,
           sha256: file.sha256,
           processed_at: file.processed_at,
@@ -176,8 +208,52 @@ export default function ingestApi(knex) {
   });
 
   // ---------------------------
+  // GET /files/:id/raw  (stream file inline)
+  // ---------------------------
+  router.get('/files/:id/raw', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'invalid_id' });
+
+      const row = await knex('ccc_files').where({ id }).first();
+      if (!row) return res.status(404).json({ ok: false, error: 'not_found' });
+
+      const full = resolveArchivedPath(row);
+      if (!full) return res.status(404).json({ ok: false, error: 'file_missing' });
+
+      // Confirm existence
+      try { await fs.access(full); } catch { return res.status(404).json({ ok: false, error: 'file_missing' }); }
+
+      res.sendFile(full);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---------------------------
+  // GET /files/:id/download  (force download)
+  // ---------------------------
+  router.get('/files/:id/download', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'invalid_id' });
+
+      const row = await knex('ccc_files').where({ id }).first();
+      if (!row) return res.status(404).json({ ok: false, error: 'not_found' });
+
+      const full = resolveArchivedPath(row);
+      if (!full) return res.status(404).json({ ok: false, error: 'file_missing' });
+
+      try { await fs.access(full); } catch { return res.status(404).json({ ok: false, error: 'file_missing' }); }
+
+      res.download(full, row.original_name || path.basename(full));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---------------------------
   // POST /files/:id/reprocess  (placeholder)
-  //   - You can wire this to enqueue a re-parse if needed.
   // ---------------------------
   router.post('/files/:id/reprocess', async (req, res, next) => {
     try {
