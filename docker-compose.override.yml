@@ -1,9 +1,5 @@
 services:
   backend:
-    environment:
-      TRUST_HTTPS: "0"     # keep HTTP in dev
-      INCOMING_DIR: /app/data/incoming
-      ARCHIVE_DIR: /app/data/archive
-    volumes:
-      - ./data/incoming:/app/data/incoming
-      - ./data/archive:/app/data/archive
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
