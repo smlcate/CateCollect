@@ -132,3 +132,15 @@ if (FRONTEND_DIR) {
 app.use(errorMw);
 
 export default app;
+
+// --- basic auth for /ingest (set BASIC_USER/BASIC_PASS in env to enable) ---
+function basicAuth(user = process.env.BASIC_USER, pass = process.env.BASIC_PASS) {
+  const expected = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+  return (req, res, next) => {
+    if (!user || !pass) return next(); // disabled if not set
+    if (req.headers.authorization === expected) return next();
+    res.setHeader('WWW-Authenticate', 'Basic realm="CateCollect"');
+    res.status(401).end('Auth required');
+  };
+}
+app.use('/ingest', basicAuth());
