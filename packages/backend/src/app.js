@@ -28,6 +28,8 @@ import ingestUploadPage from './routes/ingest.uploadpage.js';
 import knex from '../db/knexClient.js';
 
 const app = express();
+// Protect UI & API (must come BEFORE any /ingest or /api/ingest routes)
+app.use(['/ingest','/api/ingest'], basicAuth());
 
 // ---------- Uniform Agent Clusters across ALL responses ----------
 app.use((req, res, next) => {
