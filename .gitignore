@@ -8,3 +8,4 @@ dist/
 data/
 packages/backend/node_modules/
 *.bak
+db/knexfile.cjs.bak.*
