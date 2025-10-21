@@ -3,7 +3,7 @@ import path from 'path';
 import knexFactory from 'knex';
 import { extractFromXml } from './lib/claimParser.js';
 
-const POLL_MS = Number(process.env.POLL_INTERVAL_MS || 5000);
+const POLL_MS   = Number(process.env.POLL_INTERVAL_MS || 5000);
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR || path.join(process.cwd(), 'data', 'archive');
 
 const knex = knexFactory({
@@ -23,42 +23,31 @@ let lastSeen = new Set();
 
 async function once() {
   try {
-    // list archive dir
     const entries = await fs.readdir(ARCHIVE_DIR, { withFileTypes: true }).catch(() => []);
     const files = entries.filter(e => e.isFile() && /\.xml$/i.test(e.name)).map(e => e.name);
 
-    // new since last poll
     const newcomers = files.filter(f => !lastSeen.has(f));
     newcomers.forEach(f => lastSeen.add(f));
-
-    // try newest first
-    newcomers.sort((a,b) => b.localeCompare(a));
+    newcomers.sort((a,b) => b.localeCompare(a)); // newest-ish first
 
     for (const archivedName of newcomers) {
       try {
-        // find file row
         const fileRow =
           await knex('ccc_files').where({ archived_path: archivedName }).first() ||
           await knex('ccc_files').where({ stored_path: archivedName }).first();
-
         if (!fileRow) continue;
 
-        // read and parse
         const full = path.join(ARCHIVE_DIR, archivedName);
         const text = await fs.readFile(full, 'utf8');
         const meta = extractFromXml(text);
 
-        // only upsert if we actually found something useful
         if (meta.claim_number || meta.vin || meta.customer_name || meta.total_amount != null) {
           await knex('ccc_metadata')
             .insert({ file_id: fileRow.id, ...meta })
-            .onConflict('file_id')
-            .merge(meta);
-          // eslint-disable-next-line no-console
+            .onConflict('file_id').merge(meta);
           console.log('[ccc-autoparse] upserted metadata for', archivedName, '-> file_id', fileRow.id);
         }
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.error('[ccc-autoparse] error on', archivedName, e.message);
       }
     }
@@ -73,15 +62,12 @@ export function startAutoParse() {
     return;
   }
   console.log(`[ccc-autoparse] watching ${ARCHIVE_DIR} every ${POLL_MS}ms`);
-  // prime seen set so we don’t spam on first run
   fs.readdir(ARCHIVE_DIR, { withFileTypes: true }).then(entries => {
     for (const e of entries || []) if (e.isFile() && /\.xml$/i.test(e.name)) lastSeen.add(e.name);
   }).catch(() => {});
-
   setInterval(once, POLL_MS).unref();
-  // also do one pass after a short delay
   setTimeout(once, 1500).unref();
 }
 
-// auto-start if this module is imported directly
+// auto-start
 startAutoParse();
