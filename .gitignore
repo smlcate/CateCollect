@@ -9,3 +9,4 @@ data/
 packages/backend/node_modules/
 *.bak
 db/knexfile.cjs.bak.*
+docker-compose.override.yml
