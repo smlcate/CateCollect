@@ -1,6 +1,6 @@
 // packages/backend/src/db/knexClient.js
 import knex from 'knex';
-import knexfile from '../../db/knexfile.cjs'; // resolves to /app/db/knexfile.cjs at runtime
+import knexfile from '../../db/knexfile.cjs'; // resolves to /app/db/knexfile.cjs in the image
 
 const env = process.env.NODE_ENV || 'production';
 
