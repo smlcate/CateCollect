@@ -29,7 +29,8 @@ export default function ingestApi(knex) {
       let inboxCount = 0;
       try {
         const entries = await fs.readdir(INCOMING_DIR, { withFileTypes: true });
-        inboxCount = entries.filter(e => e.isFile()).length;
+        inboxCount = entries.filter(e => e.isFile() && /\.(ems|xml|awf)$/i.test(e.name)).length;
+
       } catch {}
 
       res.json({ ok:true, interval_ms: pollMs, incoming_dir: INCOMING_DIR, inbox_count: inboxCount, last_processed: last || null });

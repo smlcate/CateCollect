@@ -1,15 +1,11 @@
 // packages/backend/src/routes/ingest.uploadpage.js
 import express from 'express';
 
-const router = express.Router();
-
 export default function ingestUploadPage() {
-  // HTML shell
+  const router = express.Router();
+
   router.get('/upload', (_req, res) => {
-    res
-      .type('html')
-      .set('Cache-Control', 'no-store')
-      .send(`<!doctype html>
+    res.type('html').send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -32,60 +28,45 @@ export default function ingestUploadPage() {
 </head>
 <body>
   <div class="box">
-    <h1>Upload to Ingest</h1>
-    <p class="hint">Files here go straight to the ingest inbox. Use <code>/ingest/</code> to see processed files.</p>
-
-    <form id="f">
-      <input id="file" type="file" required />
+    <h1>Upload a CCC file</h1>
+    <p class="hint">Accepted: <strong>.xml</strong>, <strong>.ems</strong>, <strong>.awf</strong></p>
+    <form id="up" enctype="multipart/form-data" method="post" action="/api/uploads?scope=ingest">
+      <input type="file" id="file" name="file" accept=".xml,.ems,.awf" required />
       <div class="row">
         <button type="submit">Upload</button>
-        <span id="status" class="hint"></span>
+        <a href="/ingest/" style="margin-left:auto">Dashboard</a>
       </div>
     </form>
-
     <pre id="out"></pre>
   </div>
-
-  <script src="/ingest/upload.js" defer></script>
+<script>
+const out = document.getElementById('out');
+document.getElementById('up').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = document.getElementById('file').files[0];
+  if (!f) return;
+  if (!/\\.(xml|ems|awf)$/i.test(f.name)) {
+    out.textContent = 'Please choose a .xml, .ems, or .awf file.';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/uploads?scope=ingest', { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({}));
+    out.innerHTML = r.ok ? '<span class="ok">'+JSON.stringify(j,null,2)+'</span>' : '<span class="err">'+JSON.stringify(j,null,2)+'</span>';
+  } catch (err) {
+    out.innerHTML = '<span class="err">'+(err&&err.message||String(err))+'</span>';
+  }
+});
+</script>
 </body>
 </html>`);
   });
 
-  // JS (no-store so browsers don't cache old code)
+  // serve the tiny client JS separately if you already had /upload.js route (optional)
   router.get('/upload.js', (_req, res) => {
-    res
-      .type('application/javascript')
-      .set('Cache-Control', 'no-store')
-      .send(`(function(){
-  'use strict';
-  const f = document.getElementById('f');
-  const fi = document.getElementById('file');
-  const out = document.getElementById('out');
-  const status = document.getElementById('status');
-
-  function esc(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-  f.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!fi.files || !fi.files[0]) { alert('Choose a file'); return; }
-    status.textContent = 'Uploading…';
-    out.textContent = '';
-
-    const fd = new FormData();
-    fd.append('file', fi.files[0]);
-
-    try {
-      // IMPORTANT: post to ingest scope so the worker picks it up
-      const res = await fetch('/api/uploads?scope=ingest', { method: 'POST', body: fd });
-      const json = await res.json();
-      status.textContent = res.ok ? 'Uploaded ✓' : 'Upload failed';
-      out.innerHTML = '<span class="'+(res.ok?'ok':'err')+'"></span>'+esc(JSON.stringify(json, null, 2));
-    } catch (err) {
-      status.textContent = 'Upload failed';
-      out.textContent = esc(String(err));
-    }
-  });
-})();`);
+    res.type('application/javascript').send(`/* no-op; inlined script used */`);
   });
 
   return router;
