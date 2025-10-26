@@ -1,4 +1,4 @@
-import './ingest.autoparse.js';
+import './routes/ingest.autoparse.js';
 // packages/backend/src/app.js
 // Express app with uniform Origin-Agent-Cluster and a dev-safe CSP.
 // No auto HTTPS upgrade unless TRUST_HTTPS=1. Exports the app.
