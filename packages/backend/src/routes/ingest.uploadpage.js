@@ -35,7 +35,7 @@ export default function ingestUploadPage() {
 <body>
   <div class="box">
     <h1>Upload to CateCollect</h1>
-    <p class="hint">Allowed: <code>.ems</code>, <code>.xml</code>, <code>.pdf</code>, <code>.jpg</code>, <code>.png</code>, <code>.docx</code>, <code>.xlsx</code> (max ~25MB, configurable)</p>
+    <p class="hint">Allowed: <code>.awf</code>, <code>.ems</code>, <code>.xml</code>, <code>.pdf</code>, <code>.jpg</code>, <code>.png</code>, <code>.docx</code>, <code>.xlsx</code> (max ~25MB, configurable)</p>
     <form id="uform">
       <div class="row">
         <input id="file" name="file" type="file" required />

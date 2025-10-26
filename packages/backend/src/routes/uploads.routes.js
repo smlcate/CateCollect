@@ -16,11 +16,7 @@ const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data'
 // Optional “documents” root for non-EMS files
 const DOCS_ROOT   = process.env.DOCS_ROOT   || path.join(process.cwd(), 'Claims');
 
-const ALLOWED_EXTS = new Set([
-  'ems','xml',
-  'pdf','jpg','jpeg','png','heic',
-  'doc','docx','xls','xlsx','txt'
-]);
+const ALLOWED_EXTS = new Set(['ems','xml','awf','pdf','jpg','jpeg','png','heic','doc','docx','xls','xlsx','txt']);
 
 // --- Helpers ---
 async function ensureDir(dir) {
