@@ -1,54 +1,45 @@
-// packages/backend/src/db/knexClient.js  (ESM, path-agnostic for container + local dev)
-import knex from 'knex';
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
+# packages/backend/Dockerfile
+# syntax=docker/dockerfile:1.7
 
-const require = createRequire(import.meta.url);
+FROM node:20-bookworm-slim
 
-// Try multiple candidate locations so this works both:
-// - in the container:   /app/src/db  -> /app/db/knexfile.cjs   (../../db/…)
-// - in local monorepo:  packages/backend/src/db -> repo/db/…   (../../../../db/…)
-// - in case someone placed one under packages/backend/db       (../../../db/…)
-// - explicit absolute in container                            (/app/db/…)
-const candidates = [
-  '../../db/knexfile.cjs',      // container happy path
-  '../../../../db/knexfile.cjs',// local monorepo (repo-root/db)
-  '../../../db/knexfile.cjs',   // fallback if someone kept a packages/backend/db
-  '/app/db/knexfile.cjs',       // absolute container path
-];
+ENV NODE_ENV=production \
+    PORT=4000 \
+    HOST=0.0.0.0 \
+    TRUST_HTTPS=0 \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_LOGLEVEL=warn
 
-let knexfile;
-let usedPath = null;
+WORKDIR /app
 
-for (const rel of candidates) {
-  try {
-    const resolved =
-      rel.startsWith('/')
-        ? rel
-        : fileURLToPath(new URL(rel, import.meta.url));
-    knexfile = require(resolved);
-    usedPath = resolved;
-    break;
-  } catch (_) {
-    // keep trying
-  }
-}
+# tiny init + basics
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini ca-certificates bash \
+ && rm -rf /var/lib/apt/lists/*
 
-if (!knexfile) {
-  const tried = candidates
-    .map(rel => (rel.startsWith('/') ? rel : fileURLToPath(new URL(rel, import.meta.url))))
-    .join(', ');
-  throw new Error(`knexClient: could not load knexfile.cjs. Tried: ${tried}`);
-}
+# Bring in the backend source and the repo-root db/ (knexfile + migrations)
+COPY packages/backend/. /app/
+COPY db/ /app/db/
 
-const env = process.env.NODE_ENV || 'production';
-// knexfile.cjs typically exports { development: {...}, production: {...} }
-const selected = (knexfile && knexfile[env]) ? knexfile[env] : knexfile;
+# Sanity: ensure manifest exists
+RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -al /app && exit 1)
 
-// Allow DATABASE_URL to override connection
-const connOverride = process.env.DATABASE_URL ? { connection: process.env.DATABASE_URL } : {};
+# Install prod deps *after* full copy, then force + verify runtime deps.
+RUN --mount=type=cache,target=/root/.npm \
+    (npm ci --omit=dev || npm install --omit=dev) \
+ && npm i --no-save knex pg fast-xml-parser adm-zip \
+ && node -e "for (const m of ['knex','pg','fast-xml-parser','adm-zip']){console.log(m,'=>',require.resolve(m))}"
 
-const config = { ...selected, ...connOverride };
+# Legacy absolute-import shim for '/app/db/knexClient.js'
+RUN printf "export { default as default } from '../src/db/knexClient.js';\n" > /app/db/knexClient.js
 
-const db = knex(config);
-export default db;
+# Ensure container data dirs and map dev path to the volume via symlink
+RUN mkdir -p /app/data/incoming /app/data/archive \
+ && mkdir -p /app/packages/backend \
+ && rm -rf /app/packages/backend/data \
+ && ln -s /app/data /app/packages/backend/data
+
+EXPOSE 4000
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["node","src/server.js"]
