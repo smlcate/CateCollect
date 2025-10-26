@@ -1,18 +1,16 @@
-// packages/backend/db/knexClient.js   <-- NOTE: outside src
-// ESM, works in-container and in local monorepo dev.
+// packages/backend/db/knexClient.js
 import knex from 'knex';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
 
-// This file lives at /app/db/knexClient.js in the container (same dir as knexfile.cjs),
-// and at repo/packages/backend/db/knexClient.js in local dev.
-// Try sibling first, then repo-root fallback, then absolute in-container.
+// This file sits at /app/db/knexClient.js in the container (sibling to knexfile.cjs).
+// Try sibling first; then fall back to repo-root /db for local monorepo runs.
 const candidates = [
-  './knexfile.cjs',          // container happy path (sibling to this file)
-  '../../db/knexfile.cjs',   // local monorepo: packages/backend/db -> repo/db
-  '/app/db/knexfile.cjs',    // absolute container path, just in case
+  './knexfile.cjs',        // container happy path (sibling)
+  '../../db/knexfile.cjs', // local monorepo fallback: packages/backend/db -> repo/db
+  '/app/db/knexfile.cjs',  // absolute container path, belt & suspenders
 ];
 
 let knexfile;
@@ -23,7 +21,7 @@ for (const rel of candidates) {
       : fileURLToPath(new URL(rel, import.meta.url));
     knexfile = require(resolved);
     break;
-  } catch { /* try next */ }
+  } catch { /* keep trying */ }
 }
 if (!knexfile) {
   const tried = candidates
@@ -40,5 +38,6 @@ const connOverride = process.env.DATABASE_URL
   : {};
 
 const config = { ...selected, ...connOverride };
+
 const db = knex(config);
 export default db;

@@ -1,8 +1,8 @@
 # packages/backend/Dockerfile
 # syntax=docker/dockerfile:1.7
 
-# --- Base with sane defaults ---
-FROM node:20-bookworm-slim AS base
+FROM node:20-bookworm-slim
+
 ENV NODE_ENV=production \
     PORT=4000 \
     HOST=0.0.0.0 \
@@ -10,35 +10,26 @@ ENV NODE_ENV=production \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_LOGLEVEL=warn
+
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates bash tini && rm -rf /var/lib/apt/lists/*
-
-# --- Stage that installs runtime deps OUTSIDE /app to beat bind-mount masking ---
-FROM base AS deps
-WORKDIR /opt/app
-RUN printf '{ "name":"catecollect-backend-runtime","private":true }' > package.json
-RUN --mount=type=cache,target=/root/.npm \
-    npm install --omit=dev knex pg fast-xml-parser adm-zip
-
-# --- Final image ---
-FROM base AS runner
-# Make sure Node can always resolve deps we installed in /opt/node_modules
-ENV NODE_PATH=/opt/node_modules
-COPY --from=deps /opt/app/node_modules /opt/node_modules
 
 WORKDIR /app
 
-# Bring in backend code and repo-root /db (knexfile + migrations)
-# (Your layout: backend has its own /db folder with knexClient.js;
-# repo root also has /db with knexfile.cjs + migrations. Both end up in /app/db.)
+# Bring in backend code and repo-root db/ (knexfile + migrations)
 COPY packages/backend/. /app/
 COPY db/ /app/db/
 
-# Optional: install backend's own production deps (express, etc.)
-# Even if this prunes hoisted deps, our /opt/node_modules remains available via NODE_PATH.
-RUN --mount=type=cache,target=/root/.npm \
-    if [ -f package-lock.json ]; then npm ci --omit=dev || npm install --omit=dev; else npm install --omit=dev; fi
+# Sanity check
+RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -al /app && exit 1)
 
-# Ensure data dirs + map dev path logs to the volume via symlink
+# Install production deps *in /app*, then FORCE-INSTALL critical runtime deps INTO /app/node_modules,
+# and verify with require.resolve (CJS) so build fails early if anything is missing.
+RUN --mount=type=cache,target=/root/.npm \
+    ( [ -f package-lock.json ] && npm ci --omit=dev || npm install --omit=dev ) \
+ && npm i --no-save knex pg fast-xml-parser adm-zip \
+ && node -e "for (const m of ['knex','pg','fast-xml-parser','adm-zip']){console.log(m,'=>',require.resolve(m))}"
+
+# Ensure data dirs and map dev path to the volume via symlink
 RUN mkdir -p /app/data/incoming /app/data/archive \
  && mkdir -p /app/packages/backend \
  && rm -rf /app/packages/backend/data \
