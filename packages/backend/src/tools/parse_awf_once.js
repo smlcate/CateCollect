@@ -1,5 +1,7 @@
-// Scan /app/data/archive for .awf files, parse them, and upsert fields
-// into ingest_files. Safe to re-run; only fills missing fields.
+// One-shot backfill: scan /app/data/archive for .awf, parse, and update ingest_files.
+//
+// Safe to re-run. Only updates fields when we have values.
+
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -10,6 +12,27 @@ const ARCHIVE_DIR = '/app/data/archive';
 
 function sha256(buf) { return crypto.createHash('sha256').update(buf).digest('hex'); }
 
+async function updateRowFor(filename, sha, inferred) {
+  const update = {};
+  if (inferred.vin) update.vin = inferred.vin;
+  if (inferred.ro_number) update.ro_number = inferred.ro_number;
+  if (inferred.claim_number) update.claim_number = inferred.claim_number;
+  if (inferred.customer_name) update.customer_name = inferred.customer_name;
+  if (inferred.total_amount) update.total_amount = String(inferred.total_amount);
+  if (Object.keys(update).length === 0) return false;
+
+  update.processed_at = knex.fn.now();
+
+  // Prefer sha256 match; fallback to archived_path basename match
+  let n = await knex('ingest_files').where({ sha256: sha }).update(update);
+  if (n === 0) {
+    n = await knex('ingest_files')
+      .whereRaw('archived_path LIKE ?', [`%${filename}%`])
+      .update(update);
+  }
+  return n > 0;
+}
+
 async function main() {
   const files = fs.readdirSync(ARCHIVE_DIR).filter(f => /\.awf$/i.test(f));
   for (const f of files) {
@@ -18,28 +41,8 @@ async function main() {
     const sum = sha256(buf);
 
     const parsed = parseAwfBuffer(buf);
-    const fields = {
-      vin: parsed.inferred.vin || null,
-      ro_number: parsed.inferred.ro_number || null,
-      claim_number: parsed.inferred.claim_number || null,
-      customer_name: parsed.inferred.customer_name || null,
-      total_amount: parsed.inferred.total_amount || null,
-      processed_at: knex.fn.now()
-    };
-
-    // Only set fields that have values
-    const update = Object.fromEntries(Object.entries(fields).filter(([,v]) => v !== null));
-
-    try {
-      const updated = await knex('ingest_files').where({ sha256: sum }).update(update);
-      if (updated === 0) {
-        // If sha not found (e.g., older ingest), try by archived_path basename
-        await knex('ingest_files').whereRaw('archived_path LIKE ?', [`%${f}%`]).update(update);
-      }
-      console.log(`[awf-parse] ${f}`, parsed.inferred);
-    } catch (e) {
-      console.error(`[awf-parse] DB update failed for ${f}:`, e.message);
-    }
+    const ok = await updateRowFor(f, sum, parsed.inferred);
+    console.log(`[awf-backfill] ${f} -> ${ok ? 'updated' : 'no-op'}`, parsed.inferred);
   }
   await knex.destroy();
 }
