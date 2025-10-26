@@ -18,17 +18,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini ca-certificates bash \
  && rm -rf /var/lib/apt/lists/*
 
-# Bring in the backend source and the repo-root db/ (knexfile + migrations)
+# Bring in backend source (monorepo) and root db/ (knexfile + migrations)
 COPY packages/backend/. /app/
 COPY db/ /app/db/
 
-# Sanity: ensure manifest exists
+# Ensure manifests exist
 RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -al /app && exit 1)
 
-# Install prod deps *after* full copy, then force + verify runtime deps.
+# Guarantee runtime deps by ADDING them to package.json, then install prod deps
+# (avoids npm ci pruning & lockfile mismatches in monorepo setups)
 RUN --mount=type=cache,target=/root/.npm \
-    (npm ci --omit=dev || npm install --omit=dev) \
- && npm i --no-save knex pg fast-xml-parser adm-zip \
+    npm pkg set "dependencies.knex=^3.1.0" \
+                "dependencies.pg=^8.12.0" \
+                "dependencies.fast-xml-parser=^4.5.0" \
+                "dependencies.adm-zip=^0.5.10" \
+ && npm install --omit=dev \
  && node -e "for (const m of ['knex','pg','fast-xml-parser','adm-zip']){console.log(m,'=>',require.resolve(m))}"
 
 # Legacy absolute-import shim for '/app/db/knexClient.js'
