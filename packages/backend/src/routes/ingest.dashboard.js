@@ -16,7 +16,6 @@ export default function ingestDashboard(knex, { incomingDir, archiveDir }) {
           'f.error',
           'f.archived_path',
           'f.stored_path',
-          // metadata — use 'm.vin' (your table used 'vin', not 'vehicle_vin')
           'm.claim_number',
           'm.customer_name',
           'm.vin',
@@ -31,6 +30,8 @@ export default function ingestDashboard(knex, { incomingDir, archiveDir }) {
 <html><head><meta charset="utf-8"/>
 <title>CCC Ingest</title>
 <meta http-equiv="Cache-Control" content="no-store" />
+<!-- Optional: meta refresh every 10s instead of inline JS -->
+<meta http-equiv="refresh" content="10" />
 <style>
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:18px}
   table{border-collapse:collapse;width:100%}
@@ -48,7 +49,7 @@ export default function ingestDashboard(knex, { incomingDir, archiveDir }) {
     <strong>Archive:</strong> ${archiveDir}
   </p>
   <p>
-    JSON: <a href="/api/ingest/files?flat=1">/api/ingest/files?flat=1</a> &middot;
+    JSON: <a href="/api/ingest/files?flat=1">/api/ingest/files?flat=1</a> ·
     Health: <a href="/api/ingest/health">/api/ingest/health</a>
   </p>
   <table><thead><tr>
@@ -69,11 +70,6 @@ export default function ingestDashboard(knex, { incomingDir, archiveDir }) {
         <td>${r.error ? '<span class="err">error</span>' : '<span class="ok">ok</span>'}</td>
       </tr>`).join('')}
   </tbody></table>
-
-  <!-- Optional tiny auto-refresh every 10s -->
-  <script>
-    setTimeout(() => location.reload(), 10000);
-  </script>
 </body></html>`;
       res.type('html').send(html);
     } catch (err) {
