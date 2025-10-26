@@ -6,7 +6,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
-import knex from '../db/knexClient.js';
+import knex from '../../db/knexClient.js';
 
 const DISABLED = String(process.env.DISABLE_INGEST || '0') === '1';
 const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
