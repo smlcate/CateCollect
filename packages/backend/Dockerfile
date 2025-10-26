@@ -5,18 +5,20 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install prod deps for backend package (expects context = repo root)
+# Install production deps for backend (context MUST be repo root)
 COPY packages/backend/package*.json ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
 # Copy backend source
 COPY packages/backend/. .
 
-# Copy repo-root db (knexfile + migrations) into image (adds migrations; does NOT remove your backend/db client)
+# Merge repo-root db/ (knexfile + migrations) into /app/db
+# This ADDS knexfile/migrations without overwriting your backend/db/knexClient.js
 COPY db ./db
 
-# Verify a critical runtime dep (idempotent guard)
-RUN node -e "require.resolve('fast-xml-parser')" || npm i fast-xml-parser@^4 --omit=dev
+# Ensure critical runtime deps exist (belt & suspenders for monorepo drift)
+RUN npm i --no-save knex pg fast-xml-parser adm-zip \
+ && node -e "for (const m of ['knex','pg','fast-xml-parser','adm-zip']) console.log(m,'=>',require.resolve(m))"
 
 EXPOSE 4000
-CMD ["node", "src/server.js"]
+CMD ["node","src/server.js"]

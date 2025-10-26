@@ -1,33 +1,25 @@
-// packages/backend/db/knexClient.js
+// packages/backend/db/knexClient.js  (ESM, db is OUTSIDE src)
+// With the Dockerfile above, /app/db contains BOTH this file and ./knexfile.cjs
 import knex from 'knex';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-// Resolve knexfile.cjs from common spots (container + local dev)
-let knexfile;
+// Prefer sibling knexfile, then fallbacks for local dev
 const tried = [];
-for (const candidate of [
-  '../knexfile.cjs',        // /app/knexfile.cjs  (preferred; scripts also point here)
-  '../../knexfile.cjs',     // monorepo fallback
-  '../../../knexfile.cjs',  // repo root fallback
+let knexfile;
+for (const p of [
+  './knexfile.cjs',       // /app/db (container) or packages/backend/db (local)
+  '../knexfile.cjs',      // /app (container) or packages/backend (local)
+  '../../db/knexfile.cjs' // repo-root fallback (local dev)
 ]) {
-  try {
-    knexfile = require(candidate);
-    break;
-  } catch (e) {
-    tried.push(candidate);
-  }
+  try { knexfile = require(p); break; } catch (e) { tried.push(p); }
 }
-if (!knexfile) {
-  throw new Error(`knexClient: could not load knexfile.cjs. Tried: ${tried.join(', ')}`);
-}
+if (!knexfile) throw new Error(`knexClient: could not load knexfile.cjs. Tried: ${tried.join(', ')}`);
 
 const env = process.env.NODE_ENV || 'production';
 let config = (knexfile && knexfile[env]) ? knexfile[env] : knexfile;
 
-// Allow DATABASE_URL to override if provided
-if (process.env.DATABASE_URL) {
-  config = { ...config, connection: process.env.DATABASE_URL };
-}
+// Allow DATABASE_URL to override connection (compose-friendly)
+if (process.env.DATABASE_URL) config = { ...config, connection: process.env.DATABASE_URL };
 
 export default knex(config);
