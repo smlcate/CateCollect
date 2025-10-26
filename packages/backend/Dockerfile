@@ -1,6 +1,7 @@
 # packages/backend/Dockerfile
 # syntax=docker/dockerfile:1.7
 
+# --- Base with sane defaults ---
 FROM node:20-bookworm-slim AS base
 ENV NODE_ENV=production \
     PORT=4000 \
@@ -9,41 +10,40 @@ ENV NODE_ENV=production \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_LOGLEVEL=warn
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates bash tini && rm -rf /var/lib/apt/lists/*
 
-# -------- Stage: deps installed OUTSIDE /app to avoid bind-mount masking --------
+# --- Stage that installs runtime deps OUTSIDE /app to beat bind-mount masking ---
 FROM base AS deps
-WORKDIR /opt/app           # neutral workdir for dependency install
-# We only need a manifest to make npm happy; we'll pin runtime deps anyway.
+WORKDIR /opt/app
 RUN printf '{ "name":"catecollect-backend-runtime","private":true }' > package.json
-# Install the runtime deps you listed so they ALWAYS exist at runtime
 RUN --mount=type=cache,target=/root/.npm \
     npm install --omit=dev knex pg fast-xml-parser adm-zip
-# Keep only node_modules to copy into final image
-RUN test -d node_modules && find node_modules -maxdepth 1 -type d -name knex -o -name pg >/dev/null
 
-# -------- Final image --------
+# --- Final image ---
 FROM base AS runner
-# 1) Put runtime deps in a location immune to /app bind-mounts
+# Make sure Node can always resolve deps we installed in /opt/node_modules
 ENV NODE_PATH=/opt/node_modules
 COPY --from=deps /opt/app/node_modules /opt/node_modules
 
-# 2) App code lives in /app (your chosen layout)
 WORKDIR /app
-# Copy backend code and repo-root db/ (knexfile + migrations)
+
+# Bring in backend code and repo-root /db (knexfile + migrations)
+# (Your layout: backend has its own /db folder with knexClient.js;
+# repo root also has /db with knexfile.cjs + migrations. Both end up in /app/db.)
 COPY packages/backend/. /app/
 COPY db/ /app/db/
 
-# 3) Sanity: we should have the backend manifest
-RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -la /app && exit 1)
+# Optional: install backend's own production deps (express, etc.)
+# Even if this prunes hoisted deps, our /opt/node_modules remains available via NODE_PATH.
+RUN --mount=type=cache,target=/root/.npm \
+    if [ -f package-lock.json ]; then npm ci --omit=dev || npm install --omit=dev; else npm install --omit=dev; fi
 
-# 4) Legacy absolute-import shim for '/app/db/knexClient.js'
-RUN printf "export { default as default } from '../src/db/knexClient.js';\n" > /app/db/knexClient.js
-
-# 5) Ensure container data dirs and map dev path to the volume via symlink
+# Ensure data dirs + map dev path logs to the volume via symlink
 RUN mkdir -p /app/data/incoming /app/data/archive \
  && mkdir -p /app/packages/backend \
  && rm -rf /app/packages/backend/data \
  && ln -s /app/data /app/packages/backend/data
 
 EXPOSE 4000
+ENTRYPOINT ["/usr/bin/tini","--"]
 CMD ["node","src/server.js"]
