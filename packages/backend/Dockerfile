@@ -1,8 +1,7 @@
 # packages/backend/Dockerfile
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-bookworm-slim
-
+FROM node:20-bookworm-slim AS base
 ENV NODE_ENV=production \
     PORT=4000 \
     HOST=0.0.0.0 \
@@ -11,39 +10,40 @@ ENV NODE_ENV=production \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_LOGLEVEL=warn
 
+# -------- Stage: deps installed OUTSIDE /app to avoid bind-mount masking --------
+FROM base AS deps
+WORKDIR /opt/app           # neutral workdir for dependency install
+# We only need a manifest to make npm happy; we'll pin runtime deps anyway.
+RUN printf '{ "name":"catecollect-backend-runtime","private":true }' > package.json
+# Install the runtime deps you listed so they ALWAYS exist at runtime
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --omit=dev knex pg fast-xml-parser adm-zip
+# Keep only node_modules to copy into final image
+RUN test -d node_modules && find node_modules -maxdepth 1 -type d -name knex -o -name pg >/dev/null
+
+# -------- Final image --------
+FROM base AS runner
+# 1) Put runtime deps in a location immune to /app bind-mounts
+ENV NODE_PATH=/opt/node_modules
+COPY --from=deps /opt/app/node_modules /opt/node_modules
+
+# 2) App code lives in /app (your chosen layout)
 WORKDIR /app
-
-# tiny init + basics
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini ca-certificates bash \
- && rm -rf /var/lib/apt/lists/*
-
-# Bring in backend source (monorepo) and root db/ (knexfile + migrations)
+# Copy backend code and repo-root db/ (knexfile + migrations)
 COPY packages/backend/. /app/
 COPY db/ /app/db/
 
-# Ensure manifests exist
-RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -al /app && exit 1)
+# 3) Sanity: we should have the backend manifest
+RUN test -f /app/package.json || (echo "ERROR: /app/package.json missing" && ls -la /app && exit 1)
 
-# Guarantee runtime deps by ADDING them to package.json, then install prod deps
-# (avoids npm ci pruning & lockfile mismatches in monorepo setups)
-RUN --mount=type=cache,target=/root/.npm \
-    npm pkg set "dependencies.knex=^3.1.0" \
-                "dependencies.pg=^8.12.0" \
-                "dependencies.fast-xml-parser=^4.5.0" \
-                "dependencies.adm-zip=^0.5.10" \
- && npm install --omit=dev \
- && node -e "for (const m of ['knex','pg','fast-xml-parser','adm-zip']){console.log(m,'=>',require.resolve(m))}"
-
-# Legacy absolute-import shim for '/app/db/knexClient.js'
+# 4) Legacy absolute-import shim for '/app/db/knexClient.js'
 RUN printf "export { default as default } from '../src/db/knexClient.js';\n" > /app/db/knexClient.js
 
-# Ensure container data dirs and map dev path to the volume via symlink
+# 5) Ensure container data dirs and map dev path to the volume via symlink
 RUN mkdir -p /app/data/incoming /app/data/archive \
  && mkdir -p /app/packages/backend \
  && rm -rf /app/packages/backend/data \
  && ln -s /app/data /app/packages/backend/data
 
 EXPOSE 4000
-ENTRYPOINT ["/usr/bin/tini","--"]
 CMD ["node","src/server.js"]
