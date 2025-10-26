@@ -28,6 +28,22 @@ import ingestUploadPage from './routes/ingest.uploadpage.js';
 import knex from '../db/knexClient.js';
 
 const app = express();
+
+// --- anti-cache headers for ingest UI + API ---
+app.set('etag', false);
+app.use((req, res, next) => {
+  if (
+    req.path === '/ingest' ||
+    req.path.startsWith('/api/ingest')
+  ) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+  }
+  next();
+});
+
 // Protect UI & API (must come BEFORE any /ingest or /api/ingest routes)
 app.use(['/ingest','/api/ingest'], basicAuth());
 
