@@ -1,49 +1,33 @@
-// packages/backend/db/knexClient.js  (ESM; db is OUTSIDE src)
-// Resolves knexfile both in the container and in local monorepo.
+// packages/backend/db/knexClient.js
 import knex from 'knex';
 import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-
 const require = createRequire(import.meta.url);
 
-/*
-Container layout with this Dockerfile:
-  /app/db/knexClient.js         (this file)
-  /app/knex/knexfile.cjs        (repo-root db/ copied here)
-
-Local monorepo layout:
-  packages/backend/db/knexClient.js
-  repo-root/db/knexfile.cjs
-*/
-const candidates = [
-  '../knex/knexfile.cjs',   // container: /app/db -> /app/knex/knexfile.cjs
-  '../../db/knexfile.cjs',  // local monorepo: backend/db -> repo-root/db
-  '/app/knex/knexfile.cjs', // absolute container path (belt & suspenders)
-];
-
+// Resolve knexfile.cjs from common spots (container + local dev)
 let knexfile;
-for (const rel of candidates) {
+const tried = [];
+for (const candidate of [
+  '../knexfile.cjs',        // /app/knexfile.cjs  (preferred; scripts also point here)
+  '../../knexfile.cjs',     // monorepo fallback
+  '../../../knexfile.cjs',  // repo root fallback
+]) {
   try {
-    const resolved = rel.startsWith('/')
-      ? rel
-      : fileURLToPath(new URL(rel, import.meta.url));
-    knexfile = require(resolved);
+    knexfile = require(candidate);
     break;
-  } catch { /* try next */ }
+  } catch (e) {
+    tried.push(candidate);
+  }
 }
 if (!knexfile) {
-  const tried = candidates
-    .map(rel => (rel.startsWith('/') ? rel : fileURLToPath(new URL(rel, import.meta.url))))
-    .join(', ');
-  throw new Error(`knexClient: could not load knexfile.cjs. Tried: ${tried}`);
+  throw new Error(`knexClient: could not load knexfile.cjs. Tried: ${tried.join(', ')}`);
 }
 
 const env = process.env.NODE_ENV || 'production';
-const selected = (knexfile && knexfile[env]) ? knexfile[env] : knexfile;
+let config = (knexfile && knexfile[env]) ? knexfile[env] : knexfile;
 
-// Allow DATABASE_URL to override if you prefer env-driven config
-const connOverride = process.env.DATABASE_URL ? { connection: process.env.DATABASE_URL } : {};
+// Allow DATABASE_URL to override if provided
+if (process.env.DATABASE_URL) {
+  config = { ...config, connection: process.env.DATABASE_URL };
+}
 
-const config = { ...selected, ...connOverride };
-const db = knex(config);
-export default db;
+export default knex(config);
