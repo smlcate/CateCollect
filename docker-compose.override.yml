@@ -4,9 +4,14 @@ services:
     build:
       context: .
       dockerfile: packages/backend/Dockerfile
-    command: ["node","src/server.js"]   # run server directly; we migrate separately
-    ports:
-      - "4000:4000"
+    command: ["node","src/server.js"]         # we run migrations separately
+    ports: ["4000:4000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     environment:
       NODE_ENV: "production"
       HOST: "0.0.0.0"
@@ -22,10 +27,24 @@ services:
       PGPASSWORD: "devpass"
     volumes:
       - ./data:/app/data
-      - ./db/knexfile.cjs:/app/db/knexfile.cjs:ro  # force CJS knexfile inside container
-    env_file: []   # <-- at the SERVICE level (valid), not under build
+      - ./db/knexfile.cjs:/app/db/knexfile.cjs:ro
+    env_file: []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   db:
-    env_file: []   # clear any env_file from base to avoid .env noise
+    # keep DB internal-only (no host port)
+    ports: []               # clears any base mapping like "5432:5432"
+    restart: unless-stopped
+    env_file: []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       default:
         aliases: ["iw-postgres"]
