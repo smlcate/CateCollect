@@ -1,15 +1,12 @@
-// packages/backend/src/db/knexClient.js  (ESM)
+// ESM
 import knex from 'knex';
-import knexfile from '../../db/knexfile.cjs'; // resolves to /app/db/knexfile.cjs at runtime
+import knexfile from '../../../db/knexfile.cjs';
 
 const env = process.env.NODE_ENV || 'production';
-
-// knexfile.cjs typically exports { development: {...}, production: {...} }
 const selected = (knexfile && knexfile[env]) ? knexfile[env] : knexfile;
 
-// Allow DATABASE_URL to override the connection if provided
+// If DATABASE_URL is provided, prefer it (so we can point at iw-postgres cleanly)
 const connOverride = process.env.DATABASE_URL ? { connection: process.env.DATABASE_URL } : {};
-
 const config = { ...selected, ...connOverride };
 
 const db = knex(config);
