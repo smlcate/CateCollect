@@ -3,3 +3,6 @@ services:
     build:
       context: .
       dockerfile: packages/backend/Dockerfile
+      env_file: []   # <— clears any env_file from base
+    db:
+      env_file: []
