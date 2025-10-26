@@ -16,6 +16,8 @@ const toAmount = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+let __started = false;
+
 async function sha256Of(filePath) {
   const hash = crypto.createHash('sha256');
   await new Promise((resolve, reject) => {
@@ -134,6 +136,12 @@ function extractFromEms(text) {
 
 // ---------- main worker ----------
 export function startIngestWorker(knex) {
+
+  if (__started) {
+    console.log('[ccc-ingest] worker already started (ignoring second start)');
+    return;
+  }
+
   const incomingDir = process.env.INCOMING_DIR || path.join(process.cwd(), 'data', 'incoming');
   const archiveDir  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
   const pollMs = Number(process.env.POLL_INTERVAL_MS || 5000);
@@ -141,6 +149,8 @@ export function startIngestWorker(knex) {
   console.log(`[ccc-ingest] watching ${incomingDir} -> archiving to ${archiveDir} (every ${pollMs}ms)`);
 
   let busy = false;
+
+  __started = true;
 
   async function tick() {
     if (busy) return;
