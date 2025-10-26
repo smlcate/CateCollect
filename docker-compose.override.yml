@@ -1,8 +1,31 @@
+# /root/CateCollect/docker-compose.override.yml
 services:
   backend:
     build:
       context: .
       dockerfile: packages/backend/Dockerfile
-      env_file: []   # <— clears any env_file from base
-    db:
-      env_file: []
+    command: ["node","src/server.js"]   # run server directly; we migrate separately
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: "production"
+      HOST: "0.0.0.0"
+      PORT: "4000"
+      TRUST_HTTPS: "0"
+      CORS_ORIGIN: "*"
+      BASIC_USER: "admin"
+      BASIC_PASS: "ncmpTk88"
+      PGHOST: "db"
+      PGPORT: "5432"
+      PGDATABASE: "insurance_workflow"
+      PGUSER: "workflow_user"
+      PGPASSWORD: "devpass"
+    volumes:
+      - ./data:/app/data
+      - ./db/knexfile.cjs:/app/db/knexfile.cjs:ro  # force CJS knexfile inside container
+    env_file: []   # <-- at the SERVICE level (valid), not under build
+  db:
+    env_file: []   # clear any env_file from base to avoid .env noise
+    networks:
+      default:
+        aliases: ["iw-postgres"]
