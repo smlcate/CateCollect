@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+RUN apk add --no-cache postgresql-client tini bash
+WORKDIR /app
+
+# Copy package files and install production deps
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+
+# Copy the whole repo (src/, db/, web/, scripts/, etc.)
+COPY . .
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=4000
+
+EXPOSE 4000
+
+# Use tini and your existing entry script (prints "[entry] ..." logs)
+ENTRYPOINT ["/sbin/tini","--"]
+CMD ["bash","-lc","scripts/entry.sh"]

@@ -24,7 +24,7 @@ const POLL_MS      = Number(process.env.POLL_INTERVAL_MS || 5000);
 const CLAIM_AUTOCREATE = process.env.CLAIM_AUTOCREATE !== '0';
 
 // Allowed ingestable file extensions (case-insensitive)
-const INGEST_EXTS = new Set(['.ems', '.xml']);
+const INGEST_EXTS = new Set(['.ems','.xml','.awf']);
 
 // ----------- Helpers -----------
 function sha256(buf) {
@@ -134,8 +134,7 @@ async function processOneFile(fileName) {
   const buf = await fs.readFile(fullPath);
   const hash = sha256(buf);
   const size = buf.length;
-  const mime = ext === '.xml' ? 'application/xml'
-            : ext === '.ems' ? 'text/plain'
+  const mime = ext === '.xml' ? 'application/xml' : ext === '.ems' ? 'text/plain' : ext === '.awf' ? 'application/zip'
             : 'application/octet-stream';
 
   await logEvent('received', `Picked up ${originalName}`, { originalName, size });

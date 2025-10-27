@@ -1,0 +1,30 @@
+FROM node:20-alpine
+RUN apk add --no-cache postgresql-client tini bash
+WORKDIR /app
+
+# Install deps
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+
+# App source (flat layout at repo root)
+COPY . .
+
+# Runtime-only modules we rely on at runtime
+RUN npm i --no-save knex pg fast-xml-parser adm-zip
+
+# Entrypoint: ensure data dirs, wait for DB, run migrations, start API
+RUN printf '%s\n' '#!/bin/sh' \
+  'set -e' \
+  'mkdir -p /app/data /app/data/incoming /app/data/archive /app/Claims/Unassigned' \
+  'if [ -n "$PGHOST" ]; then' \
+  '  echo "[entry] waiting for postgres at $PGHOST:${PGPORT:-5432}...";' \
+  '  for i in $(seq 1 60); do pg_isready -h "$PGHOST" -p "${PGPORT:-5432}" -U "${PGUSER:-workflow_user}" >/dev/null 2>&1 && break || sleep 1; done;' \
+  'fi' \
+  'echo "[entry] running migrations (knex migrate:latest)..."' \
+  'node ./node_modules/.bin/knex --knexfile ./db/knexfile.cjs migrate:latest || true' \
+  'echo "[entry] starting API..."' \
+  'exec node src/server.js' > /usr/local/bin/entry.sh && chmod +x /usr/local/bin/entry.sh
+
+EXPOSE 4000
+ENTRYPOINT ["/sbin/tini","--"]
+CMD ["/usr/local/bin/entry.sh"]
