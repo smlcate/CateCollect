@@ -25,6 +25,8 @@ services:
       PGDATABASE: insurance_workflow
       PGUSER: workflow_user
       PGPASSWORD: devpass
+      BASIC_USER: admin
+      BASIC_PASS: ncmpTk88
     depends_on:
       - db
     ports:

@@ -24,6 +24,11 @@ import ingestApi from './routes/ingest.routes.js';
 import ingestDashboard from './routes/ingest.dashboard.js';
 import ingestUploadPage from './routes/ingest.uploadpage.js';
 
+// Ingest worker (XML/EMS parser + AWF archiver)
+import * as Ingest from './routes/ingest.autoparse.js';
+const startIngestWorker = Ingest.startIngestWorker || Ingest.default; // fallback if it's a default export
+
+
 // DB
 import knex from '../db/knexClient.js';
 
@@ -59,8 +64,6 @@ const INCOMING_DIR = process.env.INCOMING_DIR || path.join(process.cwd(), 'data'
 const ARCHIVE_DIR  = process.env.ARCHIVE_DIR  || path.join(process.cwd(), 'data', 'archive');
 
 // ---------- Security headers (Helmet) ----------
-// Turn off Helmet defaults and specify only what we want.
-// This guarantees *no* 'upgrade-insecure-requests' in dev.
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: false,
@@ -75,7 +78,6 @@ app.use(helmet({
       "style-src": ["'self'", "'unsafe-inline'"],
       "img-src": ["'self'", "data:"],
       "connect-src": ["'self'"],
-      // Only enable auto-upgrade when truly behind TLS:
       ...(TRUST_HTTPS ? { "upgrade-insecure-requests": [] } : {}),
     }
   },
@@ -107,6 +109,11 @@ app.use('/api/documents', documentsRoutes);
 app.use('/api/ingest', ingestApi(knex));
 app.use('/ingest', ingestDashboard(knex, { incomingDir: INCOMING_DIR, archiveDir: ARCHIVE_DIR }));
 app.use('/ingest', ingestUploadPage());
+
+// ---------- Start ingest worker (XML/EMS parse + AWF archive) ----------
+if (String(process.env.DISABLE_INGEST || '0') !== '1') {
+  startIngestWorker(knex);
+}
 
 // ---------- Static frontend fallback ----------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,4 +169,3 @@ function basicAuth(user = process.env.BASIC_USER, pass = process.env.BASIC_PASS)
     res.status(401).end('Auth required');
   };
 }
-app.use('/ingest', basicAuth());

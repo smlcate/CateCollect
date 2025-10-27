@@ -1,22 +1,16 @@
-// Minimal, self-contained upload page + its JS, with correct MIME types.
-// No frameworks, no CDNs, HTTP-friendly.
-
-import { Router } from 'express';
+// packages/backend/src/routes/ingest.uploadpage.js
+import express from 'express';
 
 export default function ingestUploadPage() {
-  const r = Router();
+  const router = express.Router();
 
-  // HTML page
-  r.get('/upload', (_req, res) => {
-    res
-      .type('html') // => Content-Type: text/html; charset=utf-8
-      .send(`<!doctype html>
+  router.get('/upload', (_req, res) => {
+    res.type('html').send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>CateCollect — Upload</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- No COOP/HSTS needs here; Helmet handles headers -->
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
     .box { max-width: 560px; margin: 0 auto; padding: 1rem 1.25rem; border: 1px solid #ddd; border-radius: 12px; }
@@ -37,46 +31,46 @@ export default function ingestUploadPage() {
     <h1>Upload to CateCollect</h1>
     <p class="hint">Allowed: <code>.awf</code>, <code>.ems</code>, <code>.xml</code>, <code>.pdf</code>, <code>.jpg</code>, <code>.png</code>, <code>.docx</code>, <code>.xlsx</code> (max ~25MB, configurable)</p>
     <form id="uform">
+    <h1>Upload a CCC file</h1>
+    <p class="hint">Accepted: <strong>.xml</strong>, <strong>.ems</strong>, <strong>.awf</strong></p>
+    <form id="up" enctype="multipart/form-data" method="post" action="/api/uploads?scope=ingest">
+      <input type="file" id="file" name="file" accept=".xml,.ems,.awf" required />
       <div class="row">
-        <input id="file" name="file" type="file" required />
         <button type="submit">Upload</button>
+        <a href="/ingest/" style="margin-left:auto">Dashboard</a>
       </div>
     </form>
-    <div id="out"></div>
+    <pre id="out"></pre>
   </div>
-  <script src="/ingest/upload.js" async></script>
+<script>
+const out = document.getElementById('out');
+document.getElementById('up').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = document.getElementById('file').files[0];
+  if (!f) return;
+  if (!/\\.(xml|ems|awf)$/i.test(f.name)) {
+    out.textContent = 'Please choose a .xml, .ems, or .awf file.';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/uploads?scope=ingest', { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({}));
+    out.innerHTML = r.ok ? '<span class="ok">'+JSON.stringify(j,null,2)+'</span>' : '<span class="err">'+JSON.stringify(j,null,2)+'</span>';
+  } catch (err) {
+    out.innerHTML = '<span class="err">'+(err&&err.message||String(err))+'</span>';
+  }
+});
+</script>
 </body>
 </html>`);
   });
 
-  // The JS itself (served with the correct MIME type)
-  r.get('/upload.js', (_req, res) => {
-    res
-      .type('application/javascript; charset=utf-8') // => Content-Type: application/javascript
-      .send(`(function(){
-  const $ = sel => document.querySelector(sel);
-  const out = $('#out');
-  const form = $('#uform');
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    out.textContent = 'Uploading…';
-    const fd = new FormData(form);
-    try {
-      const resp = await fetch('/api/uploads?scope=ingest', { method:'POST', body: fd });
-      const text = await resp.text();
-      let data;
-      try { data = JSON.parse(text); } catch { data = { ok:false, raw:text }; }
-      if (resp.ok && data && data.ok) {
-        out.innerHTML = '<p class="ok">Uploaded!</p><pre>'+JSON.stringify(data, null, 2)+'</pre>';
-      } else {
-        out.innerHTML = '<p class="err">Upload failed</p><pre>'+JSON.stringify(data || {status:resp.status, text}, null, 2)+'</pre>';
-      }
-    } catch (err) {
-      out.innerHTML = '<p class="err">Network error</p><pre>'+String(err)+'</pre>';
-    }
-  });
-})();`);
+  // serve the tiny client JS separately if you already had /upload.js route (optional)
+  router.get('/upload.js', (_req, res) => {
+    res.type('application/javascript').send(`/* no-op; inlined script used */`);
   });
 
-  return r;
+  return router;
 }
