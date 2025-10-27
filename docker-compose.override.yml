@@ -1,50 +1,14 @@
-# /root/CateCollect/docker-compose.override.yml
 services:
   backend:
     build:
       context: .
-      dockerfile: packages/backend/Dockerfile
-    command: ["node","src/server.js"]         # we run migrations separately
-    ports: ["4000:4000"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
     environment:
-      NODE_ENV: "production"
       HOST: "0.0.0.0"
       PORT: "4000"
-      TRUST_HTTPS: "0"
-      CORS_ORIGIN: "*"
-      BASIC_USER: "admin"
-      BASIC_PASS: "ncmpTk88"
-      PGHOST: "db"
-      PGPORT: "5432"
-      PGDATABASE: "insurance_workflow"
-      PGUSER: "workflow_user"
-      PGPASSWORD: "devpass"
     volumes:
       - ./data:/app/data
-      - ./db/knexfile.cjs:/app/db/knexfile.cjs:ro
-    env_file: []
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  db:
-    # keep DB internal-only (no host port)
-    ports: []               # clears any base mapping like "5432:5432"
-    restart: unless-stopped
-    env_file: []
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      default:
-        aliases: ["iw-postgres"]
+      - ./db:/app/db:ro
+      - ./scripts/entry.sh:/app/scripts/entry.sh:ro

@@ -1,1 +1,8 @@
-db/migrations_archive/
+node_modules
+.git
+data
+Dockerfile*
+docker-compose*.yml
+*.log
+npm-debug.log*
+yarn-error.log*
